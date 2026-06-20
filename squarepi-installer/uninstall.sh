@@ -53,6 +53,7 @@ echo "    • MPD + MPC (music player daemon)"
 echo "    • TAS5805M kernel driver (tas58xx.ko)"
 echo "    • Boot overlay entry in config.txt"
 echo "    • myMPD apt repository and key"
+echo "    • /etc/squarepi-release"
 echo ""
 echo "  Your music files will NOT be deleted."
 echo -e "${NC}"
@@ -235,13 +236,24 @@ if [[ -f "${CONFIG_FILE}" ]]; then
     info "Re-enabled onboard audio"
   fi
 
-  success "config.txt restored"
+success "config.txt restored"
 else
   warn "config.txt not found — skipping boot config restore"
 fi
 
 # -----------------------------------------------------------------------------
-# 10. Final summary
+# 10. Remove SquarePi release metadata
+# -----------------------------------------------------------------------------
+step "Removing SquarePi release metadata"
+if [[ -f /etc/squarepi-release ]]; then
+  rm -f /etc/squarepi-release
+  success "Removed /etc/squarepi-release"
+else
+  info "/etc/squarepi-release not found — skipping"
+fi
+
+# -----------------------------------------------------------------------------
+# 11. Final summary
 # -----------------------------------------------------------------------------
 echo ""
 echo -e "${BOLD}${GREEN}"

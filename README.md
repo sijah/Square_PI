@@ -89,6 +89,14 @@ To opt into automatic reboot:
 sudo SQUAREPI_AUTO_REBOOT=1 bash install.sh --with-bt
 ```
 
+Optional branding settings:
+
+```bash
+sudo SQUAREPI_HOSTNAME=squarepi bash install.sh
+sudo SQUAREPI_BT_NAME="Kitchen SquarePi" bash install.sh --with-bt
+sudo SQUAREPI_BRAND_NAME="SquarePi" SQUAREPI_TAGLINE="DIY Raspberry Pi Hi-Fi Music Player" bash install.sh
+```
+
 ---
 
 ## Installer behaviour
@@ -112,6 +120,8 @@ The installer:
 - Checks that myMPD responds on port `8080`
 - Creates `/mnt/usb-music` as a standard USB music mount point
 - Attempts to install `exfatprogs` for exFAT USB flash drive support
+- Can set a branded hostname when `SQUAREPI_HOSTNAME=<name>` is provided
+- Writes install metadata to `/etc/squarepi-release`
 
 With `--with-bt`, the installer additionally:
 
@@ -300,6 +310,7 @@ sudo umount /mnt/usb-music
 | myMPD web port | `8080` |
 | Bluetooth device name | `SquarePi` |
 | Bluetooth codec | SBC |
+| Release metadata | `/etc/squarepi-release` |
 
 To override the I2C address, edit the top of `install.sh` before running:
 
@@ -308,6 +319,31 @@ TAS_I2C_ADDR="0x2d"
 ```
 
 Do not add `pdn_gpio` for SquarePi V1. PDN is pulled HIGH via a 10K resistor on the board.
+
+### Branding options
+
+These environment variables can be passed when running the installer:
+
+| Variable | Purpose |
+|---|---|
+| `SQUAREPI_HOSTNAME` | Sets the Raspberry Pi hostname, for example `squarepi` |
+| `SQUAREPI_BT_NAME` | Sets the Bluetooth device name when using `--with-bt` |
+| `SQUAREPI_BRAND_NAME` | Changes the name shown in installer banners and MPD output |
+| `SQUAREPI_TAGLINE` | Changes the tagline shown in the installer banner |
+| `SQUAREPI_PROJECT_URL` | Changes the docs URL printed in the final summary |
+| `SQUAREPI_SUPPORT_URL` | Changes the support/issues URL printed in the final summary |
+
+Example:
+
+```bash
+sudo SQUAREPI_HOSTNAME=squarepi SQUAREPI_BT_NAME="Kitchen SquarePi" bash install.sh --with-bt
+```
+
+After install, metadata can be viewed with:
+
+```bash
+cat /etc/squarepi-release
+```
 
 ---
 

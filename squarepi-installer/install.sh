@@ -8,6 +8,8 @@
 #    sudo bash install.sh              # MPD + myMPD only
 #    sudo bash install.sh --with-bt   # MPD + myMPD + Bluetooth A2DP
 #    sudo SQUAREPI_AUTO_REBOOT=1 bash install.sh --with-bt
+#    sudo SQUAREPI_HOSTNAME=squarepi bash install.sh
+#    sudo SQUAREPI_BT_NAME="Kitchen SquarePi" bash install.sh --with-bt
 # =============================================================================
 
 set -euo pipefail
@@ -27,6 +29,7 @@ success() { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error()   { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 step()    { echo -e "\n${BOLD}${CYAN}>>> $*${NC}"; }
+box_line() { printf "  ║ %-44.44s ║\n" "$*"; }
 
 # -----------------------------------------------------------------------------
 # Parse arguments
@@ -37,8 +40,15 @@ for arg in "$@"; do
 done
 
 # -----------------------------------------------------------------------------
-# SquarePi hardware config — edit here if your HAT differs
+# SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
+BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
+BRAND_TAGLINE="${SQUAREPI_TAGLINE:-DIY Raspberry Pi Hi-Fi Music Player}"
+PROJECT_URL="${SQUAREPI_PROJECT_URL:-https://github.com/sijah/Square_PI}"
+SUPPORT_URL="${SQUAREPI_SUPPORT_URL:-${PROJECT_URL}/issues}"
+RELEASE_FILE="/etc/squarepi-release"
+HOSTNAME_REQUESTED="${SQUAREPI_HOSTNAME:-}"
+
 TAS_I2C_ADDR=""               # Auto-detected (0x2c/0x2d/0x2e/0x2f); override if needed
 TAS_DRIVER_REPO="https://github.com/sonocotta/tas5805m-driver-for-raspbian"
 MPD_MUSIC_DIR="/var/lib/mpd/music"
@@ -46,7 +56,7 @@ USB_MUSIC_DIR="/mnt/usb-music"
 MYMPD_HTTP_PORT="8080"
 CONFIG_BACKUP=""
 
-BT_DEVICE_NAME="SquarePi"
+BT_DEVICE_NAME="${SQUAREPI_BT_NAME:-${BRAND_NAME}}"
 ALSA_SINK="hw:LouderRaspberry,0"
 
 # -----------------------------------------------------------------------------
@@ -54,10 +64,11 @@ ALSA_SINK="hw:LouderRaspberry,0"
 # -----------------------------------------------------------------------------
 echo -e "${BOLD}"
 echo "  ╔══════════════════════════════════════════════╗"
-echo "  ║         SquarePi Software Installer          ║"
-echo "  ║   TAS5805M HAT + MPD + myMPD on RPi OS Lite  ║"
+box_line "${BRAND_NAME}"
+box_line "${BRAND_TAGLINE}"
+box_line "TAS5805M HAT + MPD + myMPD"
 if [[ $INSTALL_BT -eq 1 ]]; then
-echo "  ║        + Bluetooth A2DP Receiver              ║"
+box_line "+ Bluetooth A2DP Receiver"
 fi
 echo "  ╚══════════════════════════════════════════════╝"
 echo -e "${NC}"
@@ -126,14 +137,38 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 4. Update package index
+# 4. Optional hostname branding
+# -----------------------------------------------------------------------------
+step "Checking hostname branding"
+
+if [[ -n "${HOSTNAME_REQUESTED}" ]]; then
+  if [[ ! "${HOSTNAME_REQUESTED}" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,62}$ || "${HOSTNAME_REQUESTED}" == *- ]]; then
+    warn "Invalid SQUAREPI_HOSTNAME '${HOSTNAME_REQUESTED}' — keeping current hostname"
+  elif command -v hostnamectl &>/dev/null; then
+    CURRENT_HOSTNAME=$(hostname)
+    if [[ "${CURRENT_HOSTNAME}" == "${HOSTNAME_REQUESTED}" ]]; then
+      info "Hostname already set to ${HOSTNAME_REQUESTED}"
+    else
+      hostnamectl set-hostname "${HOSTNAME_REQUESTED}" && \
+        success "Hostname set to ${HOSTNAME_REQUESTED}" || \
+        warn "Could not set hostname to ${HOSTNAME_REQUESTED}"
+    fi
+  else
+    warn "hostnamectl not available — skipping hostname change"
+  fi
+else
+  info "Hostname unchanged. To set it, rerun with SQUAREPI_HOSTNAME=squarepi"
+fi
+
+# -----------------------------------------------------------------------------
+# 5. Update package index
 # -----------------------------------------------------------------------------
 step "Updating package index"
 apt-get update -qq
 success "Package index updated"
 
 # -----------------------------------------------------------------------------
-# 5. Detect architecture for kernel headers
+# 6. Detect architecture for kernel headers
 # -----------------------------------------------------------------------------
 step "Detecting hardware architecture"
 
@@ -168,7 +203,7 @@ fi
 info "Kernel headers: ${KERNEL_HEADERS_PKG}"
 
 # -----------------------------------------------------------------------------
-# 6. Install core audio packages
+# 7. Install core audio packages
 # -----------------------------------------------------------------------------
 step "Installing MPD, MPC, ALSA utilities and kernel headers"
 apt-get install -y -qq \
@@ -183,7 +218,7 @@ apt-get install -y -qq \
 success "Core packages installed"
 
 # -----------------------------------------------------------------------------
-# 7. Build and install TAS5805M kernel driver
+# 8. Build and install TAS5805M kernel driver
 # -----------------------------------------------------------------------------
 step "Building TAS5805M kernel driver from source"
 
@@ -204,7 +239,7 @@ rm -rf "${TMP_DIR}"
 success "TAS5805M driver built and installed"
 
 # -----------------------------------------------------------------------------
-# 8. Configure /boot/firmware/config.txt
+# 9. Configure /boot/firmware/config.txt
 # -----------------------------------------------------------------------------
 step "Configuring boot overlay"
 
@@ -273,7 +308,7 @@ EOF
 fi
 
 # -----------------------------------------------------------------------------
-# 9. Configure MPD
+# 10. Configure MPD
 # -----------------------------------------------------------------------------
 step "Configuring MPD"
 
@@ -286,7 +321,7 @@ chown -R mpd:audio /var/lib/mpd /var/log/mpd 2>/dev/null || true
 info "Music directory: ${MPD_MUSIC_DIR}"
 
 cat > /etc/mpd.conf <<EOF
-# MPD configuration for SquarePi (TAS5805M HAT)
+# MPD configuration for ${BRAND_NAME} (TAS5805M HAT)
 # Generated by squarepi-installer
 
 music_directory    "${MPD_MUSIC_DIR}"
@@ -301,7 +336,7 @@ port               "6600"
 
 audio_output {
     type            "alsa"
-    name            "SquarePi TAS5805M"
+    name            "${BRAND_NAME} TAS5805M"
     device          "plughw:LouderRaspberry,0"
     format          "44100:16:2"
     mixer_type      "software"
@@ -331,7 +366,7 @@ rm -f "${MPD_TEST_LOG}"
 success "MPD configuration validated"
 
 # -----------------------------------------------------------------------------
-# 10. Enable and start MPD
+# 11. Enable and start MPD
 # -----------------------------------------------------------------------------
 step "Enabling MPD service"
 systemctl enable mpd 2>/dev/null || true
@@ -345,7 +380,7 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 11. Install myMPD
+# 12. Install myMPD
 # -----------------------------------------------------------------------------
 step "Adding myMPD repository"
 
@@ -371,7 +406,7 @@ apt-get install -y -qq mympd
 success "myMPD installed"
 
 # -----------------------------------------------------------------------------
-# 12. Enable and start myMPD
+# 13. Enable and start myMPD
 # -----------------------------------------------------------------------------
 step "Enabling myMPD service"
 systemctl enable mympd 2>/dev/null || true
@@ -389,7 +424,7 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 13. Prepare USB music mount point
+# 14. Prepare USB music mount point
 # -----------------------------------------------------------------------------
 step "Preparing USB music mount point"
 mkdir -p "${USB_MUSIC_DIR}"
@@ -405,6 +440,27 @@ fi
 
 info "USB drives are not auto-mounted by this installer."
 info "Mount a drive at ${USB_MUSIC_DIR}, then set MPD music_directory to that path if desired."
+
+# -----------------------------------------------------------------------------
+# 15. Write SquarePi release metadata
+# -----------------------------------------------------------------------------
+step "Writing ${BRAND_NAME} release metadata"
+cat > "${RELEASE_FILE}" <<EOF
+NAME="${BRAND_NAME}"
+TAGLINE="${BRAND_TAGLINE}"
+VERSION=1.0
+HARDWARE="SquarePi TAS5805M HAT"
+PROJECT_URL="${PROJECT_URL}"
+SUPPORT_URL="${SUPPORT_URL}"
+INSTALL_DATE="$(date -Iseconds)"
+MPD_MUSIC_DIR="${MPD_MUSIC_DIR}"
+USB_MUSIC_DIR="${USB_MUSIC_DIR}"
+MYMPD_HTTP_PORT="${MYMPD_HTTP_PORT}"
+BLUETOOTH_ENABLED=${INSTALL_BT}
+BLUETOOTH_NAME="${BT_DEVICE_NAME}"
+EOF
+chmod 644 "${RELEASE_FILE}"
+success "Release metadata written to ${RELEASE_FILE}"
 
 # =============================================================================
 # BLUETOOTH A2DP SETUP (only if --with-bt passed)
@@ -645,14 +701,20 @@ PI_IP=$(hostname -I | awk '{print $1}')
 echo ""
 echo -e "${BOLD}${GREEN}"
 echo "  ╔══════════════════════════════════════════════╗"
-echo "  ║           Installation Complete!             ║"
+box_line "${BRAND_NAME} is ready"
 echo "  ╚══════════════════════════════════════════════╝"
 echo -e "${NC}"
 echo -e "  ${BOLD}myMPD Web UI:${NC}   http://${PI_IP}:${MYMPD_HTTP_PORT}"
+if [[ -n "${HOSTNAME_REQUESTED}" ]]; then
+echo -e "  ${BOLD}mDNS URL:${NC}       http://${HOSTNAME_REQUESTED}.local:${MYMPD_HTTP_PORT}"
+fi
 echo -e "  ${BOLD}MPD Port:${NC}       ${PI_IP}:6600"
 echo -e "  ${BOLD}Music folder:${NC}   ${MPD_MUSIC_DIR}"
 echo -e "  ${BOLD}USB mount:${NC}      ${USB_MUSIC_DIR}"
 echo -e "  ${BOLD}Boot backup:${NC}    ${CONFIG_BACKUP}"
+echo -e "  ${BOLD}Release file:${NC}   ${RELEASE_FILE}"
+echo -e "  ${BOLD}Docs:${NC}           ${PROJECT_URL}"
+echo -e "  ${BOLD}Support:${NC}        ${SUPPORT_URL}"
 
 if [[ $INSTALL_BT -eq 1 ]]; then
 echo ""
