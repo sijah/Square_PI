@@ -150,14 +150,6 @@ To opt into automatic reboot:
 sudo SQUAREPI_AUTO_REBOOT=1 bash install.sh --with-bt
 ```
 
-Optional branding settings:
-
-```bash
-sudo SQUAREPI_HOSTNAME=squarepi bash install.sh
-sudo SQUAREPI_BT_NAME="Kitchen SquarePi" bash install.sh --with-bt
-sudo SQUAREPI_BRAND_NAME="SquarePi" SQUAREPI_TAGLINE="DIY Raspberry Pi Hi-Fi Music Player" bash install.sh
-```
-
 ---
 
 ## Installer behaviour
