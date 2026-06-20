@@ -53,7 +53,6 @@ echo "    • MPD + MPC (music player daemon)"
 echo "    • TAS5805M kernel driver (tas58xx.ko)"
 echo "    • Boot overlay entry in config.txt"
 echo "    • myMPD apt repository and key"
-echo "    • usbmount (if installed by squarepi)"
 echo ""
 echo "  Your music files will NOT be deleted."
 echo -e "${NC}"
@@ -242,24 +241,7 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 10. Remove usbmount (only if installed by squarepi installer)
-# -----------------------------------------------------------------------------
-step "Checking usbmount"
-if dpkg -l usbmount &>/dev/null 2>&1; then
-  read -r -p "  Remove usbmount? [y/N] " REMOVE_USB
-  if [[ "${REMOVE_USB}" =~ ^[Yy]$ ]]; then
-    apt-get remove -y -qq usbmount
-    apt-get autoremove -y -qq
-    success "usbmount removed"
-  else
-    info "usbmount kept"
-  fi
-else
-  info "usbmount not installed — skipping"
-fi
-
-# -----------------------------------------------------------------------------
-# 11. Final summary
+# 10. Final summary
 # -----------------------------------------------------------------------------
 echo ""
 echo -e "${BOLD}${GREEN}"

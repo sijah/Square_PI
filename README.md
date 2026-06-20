@@ -27,7 +27,7 @@ This project does not provide a custom web UI, music library manager, DSP tuning
 | `mpc` | MPD command-line client |
 | `alsa-utils` | ALSA tools such as `aplay`, `alsamixer`, and `speaker-test` |
 | `mympd` | Mobile-friendly web UI for MPD |
-| `usbmount` | Best-effort optional USB auto-mount support |
+| `exfatprogs` | Best-effort exFAT USB flash drive support |
 
 With `--with-bt`, the following are also installed:
 
@@ -110,7 +110,8 @@ The installer:
 - Validates `/etc/mpd.conf` before starting MPD
 - Triggers an initial MPD database scan with `mpc update`
 - Checks that myMPD responds on port `8080`
-- Attempts to install `usbmount` for basic USB auto-mount support
+- Creates `/mnt/usb-music` as a standard USB music mount point
+- Attempts to install `exfatprogs` for exFAT USB flash drive support
 
 With `--with-bt`, the installer additionally:
 
@@ -171,7 +172,7 @@ Internet radio streams can be added from myMPD under **Browse > Webradio**.
 
 ## Mount a USB flash drive
 
-The installer tries to install `usbmount`, but USB auto-mount support can vary between Raspberry Pi OS releases. The most reliable setup is to mount the flash drive yourself and point MPD at it.
+The installer creates `/mnt/usb-music` as a standard mount point. It does not auto-mount USB drives because Raspberry Pi OS Bookworm/Trixie systems do not always ship a reliable `usbmount` package. The most reliable setup is to mount the flash drive yourself and point MPD at it.
 
 ### 1. Plug in the drive and find it
 
@@ -448,7 +449,7 @@ Or run directly from GitHub:
 curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/uninstall.sh | sudo bash
 ```
 
-The uninstaller removes myMPD, MPD/MPC, the TAS5805M kernel driver, boot overlay, and the myMPD apt repository. It prompts before removing MPD data under `/var/lib/mpd`, before removing `usbmount`, and before rebooting. Music files are not deleted unless you confirm removal of MPD data.
+The uninstaller removes myMPD, MPD/MPC, the TAS5805M kernel driver, boot overlay, and the myMPD apt repository. It prompts before removing MPD data under `/var/lib/mpd` and before rebooting. Music files are not deleted unless you confirm removal of MPD data.
 
 ---
 

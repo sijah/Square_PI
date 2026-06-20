@@ -42,6 +42,7 @@ done
 TAS_I2C_ADDR=""               # Auto-detected (0x2c/0x2d/0x2e/0x2f); override if needed
 TAS_DRIVER_REPO="https://github.com/sonocotta/tas5805m-driver-for-raspbian"
 MPD_MUSIC_DIR="/var/lib/mpd/music"
+USB_MUSIC_DIR="/mnt/usb-music"
 MYMPD_HTTP_PORT="8080"
 CONFIG_BACKUP=""
 
@@ -388,11 +389,22 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 13. USB auto-mount (optional)
+# 13. Prepare USB music mount point
 # -----------------------------------------------------------------------------
-step "Setting up USB drive auto-mount"
-apt-get install -y -qq usbmount 2>/dev/null || \
-  warn "usbmount not available — USB drives will need manual mounting"
+step "Preparing USB music mount point"
+mkdir -p "${USB_MUSIC_DIR}"
+chmod 755 "${USB_MUSIC_DIR}"
+success "USB music mount point ready: ${USB_MUSIC_DIR}"
+
+if apt-cache show exfatprogs &>/dev/null 2>&1; then
+  apt-get install -y -qq exfatprogs || \
+    warn "exfatprogs install failed — exFAT USB drives may need manual package setup"
+else
+  warn "exfatprogs not available — exFAT USB drives may need manual package setup"
+fi
+
+info "USB drives are not auto-mounted by this installer."
+info "Mount a drive at ${USB_MUSIC_DIR}, then set MPD music_directory to that path if desired."
 
 # =============================================================================
 # BLUETOOTH A2DP SETUP (only if --with-bt passed)
@@ -639,6 +651,7 @@ echo -e "${NC}"
 echo -e "  ${BOLD}myMPD Web UI:${NC}   http://${PI_IP}:${MYMPD_HTTP_PORT}"
 echo -e "  ${BOLD}MPD Port:${NC}       ${PI_IP}:6600"
 echo -e "  ${BOLD}Music folder:${NC}   ${MPD_MUSIC_DIR}"
+echo -e "  ${BOLD}USB mount:${NC}      ${USB_MUSIC_DIR}"
 echo -e "  ${BOLD}Boot backup:${NC}    ${CONFIG_BACKUP}"
 
 if [[ $INSTALL_BT -eq 1 ]]; then
