@@ -4,6 +4,8 @@ Installer scripts for a Raspberry Pi based **SquarePi Class-D amplifier HAT** mu
 
 SquarePi turns a fresh Raspberry Pi OS Lite image into a headless MPD/myMPD audio player using the SquarePi I2S amplifier HAT. Optional Bluetooth A2DP receiver support is available with a command-line flag.
 
+![SquarePi v1.0 wiring diagram](docs/images/squarepi-v1-wiring-diagram.png)
+
 ---
 
 ## Project scope
@@ -14,6 +16,65 @@ SquarePi turns a fresh Raspberry Pi OS Lite image into a headless MPD/myMPD audi
 | `squarepi-installer/uninstall.sh` | Removes services, driver, boot overlay, myMPD repository, and optional MPD data |
 
 This project does not provide a custom web UI, music library manager, DSP tuning presets, or a desktop audio setup. It is intended for a headless Raspberry Pi OS Lite appliance.
+
+---
+
+## Hardware
+
+SquarePi hardware revision: **v1.0**
+
+SquarePi is a compact Class-D amplifier HAT for Raspberry Pi based audio players, active speaker builds, and DIY hi-fi projects.
+
+### Hardware features
+
+- Class-D amplifier output: `2x30W into 4 ohm` or `2x15W into 8 ohm`
+- I2S digital audio input directly from Raspberry Pi GPIO
+- I2C control path for DSP configuration such as EQ, loudness, and DRC
+- Single DC supply input: `12-24V DC`
+- Standard Raspberry Pi HAT form factor with 40-pin GPIO passthrough
+- Screw terminal speaker output
+- Passive speaker support: `4-8 ohm`
+- Status LEDs and IR receiver footprint
+- Open-source hardware design files
+
+### Raspberry Pi compatibility
+
+- Raspberry Pi 5
+- Raspberry Pi 4 Model B
+- Raspberry Pi 3B+
+- Raspberry Pi 3B
+- Raspberry Pi Zero 2 W
+- Raspberry Pi Zero W
+
+### Power and speaker wiring
+
+Use a regulated `12-24V DC` power supply. A `3A` or higher supply is recommended.
+
+Speaker terminal labels:
+
+| Terminal | Connection |
+|---|---|
+| `LP` | Left speaker positive |
+| `LN` | Left speaker negative |
+| `RN` | Right speaker negative |
+| `RP` | Right speaker positive |
+
+Important:
+
+- Check power polarity before switching on.
+- Use passive speakers only.
+- Use `4-8 ohm` speakers.
+- Do not connect speakers with impedance lower than `4 ohm`.
+- Do not connect or disconnect speakers while the system is powered on.
+
+### Hardware files
+
+Hardware v1.0 production files are provided in GitHub Releases:
+
+- Gerber files
+- BOM
+- Assembly/reference images
+- KiCad/open hardware design files, if included in the release package
 
 ---
 
