@@ -380,6 +380,44 @@ MPD and Bluetooth share the same TAS5805M output. Pause MPD before switching to 
 - To check BlueALSA: `systemctl status bluealsa`
 - To check the pairing agent: `systemctl status squarepi-bt-agent`
 
+### Fix Bluetooth authentication failed
+
+If pairing fails with a log like `auth failed with status 0x05 (Authentication Failed)`, remove the old pairing on both sides and pair again.
+
+On your phone, forget/remove the `SquarePi` Bluetooth device.
+
+On the Raspberry Pi:
+
+```bash
+sudo bluetoothctl
+power on
+pairable on
+discoverable on
+devices
+remove F8:54:F6:1B:49:B0
+scan on
+```
+
+Replace `F8:54:F6:1B:49:B0` with the device address shown in your logs or by `devices`.
+
+Then restart the SquarePi pairing agent:
+
+```bash
+sudo systemctl restart bluetooth
+sudo systemctl restart squarepi-bt-agent
+sudo bluetoothctl power on
+sudo bluetoothctl pairable on
+sudo bluetoothctl discoverable on
+```
+
+Now pair again from the phone. If it still fails, check:
+
+```bash
+systemctl status squarepi-bt-agent
+journalctl -u squarepi-bt-agent -n 50
+journalctl -u bluetooth -n 80
+```
+
 ---
 
 ## Troubleshooting
@@ -456,8 +494,11 @@ curl -fs http://127.0.0.1:8080
 ```bash
 rfkill list
 sudo rfkill unblock bluetooth
+sudo systemctl restart bluetooth
+sudo systemctl restart squarepi-bt-agent
 sudo bluetoothctl
   power on
+  pairable on
   discoverable on
   show
 ```

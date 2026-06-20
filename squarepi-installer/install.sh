@@ -562,7 +562,11 @@ EOF
 systemctl restart bluetooth
 sleep 2
 
-# Set alias via bluetoothctl to ensure name shows immediately (survives hostname mismatch)
+# Apply runtime adapter state. main.conf handles defaults, but bluetoothctl makes
+# the adapter immediately usable after install and after service restarts.
+bluetoothctl power on 2>/dev/null || true
+bluetoothctl pairable on 2>/dev/null || true
+bluetoothctl discoverable on 2>/dev/null || true
 bluetoothctl system-alias "${BT_DEVICE_NAME}" 2>/dev/null || true
 
 success "Adapter configured as '${BT_DEVICE_NAME}'"
