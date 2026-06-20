@@ -2,7 +2,7 @@
 # =============================================================================
 #  SquarePi Uninstaller
 #  Removes everything installed by install.sh
-#  — myMPD, MPD, TAS5805M driver, boot overlay, repo keys
+#  — myMPD, MPD, SquarePi audio driver, boot overlay, repo keys
 #
 #  Usage:
 #    sudo bash uninstall.sh
@@ -32,7 +32,7 @@ step()    { echo -e "\n${BOLD}${CYAN}>>> $*${NC}"; }
 echo -e "${BOLD}"
 echo "  ╔══════════════════════════════════════════════╗"
 echo "  ║         SquarePi Software Uninstaller        ║"
-echo "  ║   Removes TAS5805M driver, MPD and myMPD     ║"
+echo "  ║   Removes SquarePi audio, MPD and myMPD      ║"
 echo "  ╚══════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -50,7 +50,7 @@ echo -e "${YELLOW}"
 echo "  This will remove:"
 echo "    • myMPD (web UI)"
 echo "    • MPD + MPC (music player daemon)"
-echo "    • TAS5805M kernel driver (tas58xx.ko)"
+echo "    • SquarePi audio driver (tas58xx.ko)"
 echo "    • Boot overlay entry in config.txt"
 echo "    • myMPD apt repository and key"
 echo "    • /etc/squarepi-release"
@@ -162,9 +162,9 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 8. Remove TAS5805M kernel driver
+# 8. Remove SquarePi audio driver
 # -----------------------------------------------------------------------------
-step "Removing TAS5805M kernel driver"
+step "Removing SquarePi audio driver"
 
 TAS_DRIVER_REPO="https://github.com/sonocotta/tas5805m-driver-for-raspbian"
 KERNEL=$(uname -r)
@@ -215,7 +215,7 @@ done
 # Remove any modprobe config left behind
 rm -f /etc/modprobe.d/tas58xx.conf 2>/dev/null || true
 
-success "TAS5805M driver removed"
+success "SquarePi audio driver removed"
 
 # -----------------------------------------------------------------------------
 # 9. Clean up /boot/firmware/config.txt
@@ -228,6 +228,7 @@ CONFIG_FILE="/boot/firmware/config.txt"
 if [[ -f "${CONFIG_FILE}" ]]; then
   # Remove SquarePi overlay lines
   sed -i '/# SquarePi TAS5805M HAT/d' "${CONFIG_FILE}"
+  sed -i '/# SquarePi HAT/d' "${CONFIG_FILE}"
   sed -i '/dtoverlay=tas58xx/d'        "${CONFIG_FILE}"
 
   # Re-enable onboard audio if it was disabled by installer
@@ -264,7 +265,7 @@ echo -e "${NC}"
 echo -e "  ${BOLD}Removed:${NC}"
 echo -e "    ✓ myMPD"
 echo -e "    ✓ MPD + MPC"
-echo -e "    ✓ TAS5805M kernel driver"
+echo -e "    ✓ SquarePi audio driver"
 echo -e "    ✓ Boot overlay (config.txt)"
 echo -e "    ✓ apt repository and GPG key"
 echo ""
