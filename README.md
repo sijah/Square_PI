@@ -35,10 +35,11 @@ SquarePi is a compact Class-D amplifier HAT for Raspberry Pi based audio players
 
 ### Hardware features
 
-- Class-D amplifier output: `2x30W into 4 ohm` or `2x15W into 8 ohm`
+- Class-D amplifier output: up to `2×23W into 8Ω` or `2×30W into 4Ω` (at 21–24V, THD+N = 1%); `2×13W into 4Ω` at 12V
 - I2S digital audio input directly from Raspberry Pi GPIO
 - I2C control path for DSP configuration such as EQ, loudness, and DRC
-- Single DC supply input: `12-24V DC`
+- Single DC supply input: `12-24V DC` (output power scales with supply voltage)
+- Recommended for heatsink-less operation: `12V DC` with `8Ω` speakers
 - Standard Raspberry Pi HAT form factor with 40-pin GPIO passthrough
 - Screw terminal speaker output
 - Passive speaker support: `4-8 ohm`
@@ -56,7 +57,15 @@ SquarePi is a compact Class-D amplifier HAT for Raspberry Pi based audio players
 
 ### Power and speaker wiring
 
-Use a regulated `12-24V DC` power supply. A `3A` or higher supply is recommended.
+Use a regulated `12-24V DC` power supply. Recommended minimum current rating by voltage:
+
+| Supply voltage | Minimum current | Notes |
+|---|---|---|
+| 12V | 3A | ~13W/ch into 4Ω max |
+| 19V | 3A | ~20W/ch into 8Ω |
+| 24V | 3A | ~23W/ch into 8Ω, full rated output |
+
+A higher current rating never hurts — a 5A supply at any voltage gives clean headroom for peaks.
 
 Speaker terminal labels:
 
@@ -74,6 +83,29 @@ Important:
 - Use `4-8 ohm` speakers.
 - Do not connect speakers with impedance lower than `4 ohm`.
 - Do not connect or disconnect speakers while the system is powered on.
+
+
+### SquarePi Thermal & Power Recommendations
+
+SquarePi is designed as a **heatsink-less audio amplifier platform**. The PCB layout, power stage, and thermal design are optimized for normal music playback without requiring an external heatsink or active cooling.
+
+| Parameter | Recommended |
+|---|---|
+| Supply voltage | **12V DC** (recommended) |
+| Speaker impedance | **8Ω preferred**, 4Ω supported |
+| Recommended continuous power | **6–7W per channel into 8Ω** |
+| Maximum music playback | **2×13W into 4Ω at 12V** |
+| Recommended power supply | **12V / 3A minimum** |
+| Heavy-use power supply | **12V / 5A recommended** |
+| Ambient temperature | **≤35°C** for sustained high-volume playback |
+
+**Notes**
+
+- For the best thermal performance without a heatsink, use **12V with 8Ω speakers**.
+- SquarePi is optimized for music playback where average power is significantly lower than peak power.
+- Using **4Ω speakers at high volume for extended periods**, particularly at supply voltages above 12V, increases heat generation and may activate thermal protection.
+- SquarePi incorporates **automatic thermal management**, reducing output power if excessive temperatures are detected and automatically restoring full performance once normal operating temperatures return.
+- Operating within the recommended conditions above ensures the best long-term reliability and performance.
 
 ### Hardware files
 
