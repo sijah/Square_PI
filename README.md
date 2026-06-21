@@ -1,4 +1,12 @@
-# SquarePi Installer
+# SquarePi
+
+You already have a Raspberry Pi. You have speakers. SquarePi is the missing piece — a 2×30W Class-D amplifier HAT that turns a bare Pi into a headless, network-connected audio appliance.
+
+One installer. MPD + myMPD out of the box. Optional Bluetooth A2DP. Designed to just work.
+
+And when you want to go deeper — a **15-band parametric EQ** is right there in the terminal, exposed directly through ALSA by the SquarePi onboard DSP. No app, no cloud, no subscription. Just `alsamixer` and full control over your sound. Under the hood, SquarePi packs a full DSP suite — multiband DRC, automatic gain limiting, crossover routing for 2.1 setups, and thermal foldback — all tunable over I²C without touching a single potentiometer.
+
+---
 
 Installer scripts for a Raspberry Pi based **SquarePi Class-D amplifier HAT** music player.
 
@@ -420,15 +428,62 @@ sudo systemctl restart mpd
 
 ## DSP and EQ
 
-The SquarePi audio driver exposes amplifier controls through ALSA:
+SquarePi's onboard DSP is far more capable than a typical amplifier chip. It exposes a full suite of professional audio processing features — all accessible over I²C, no external DSP chip or app required.
+
+### Audio performance
+
+| Parameter | Value |
+|---|---|
+| THD+N | ≤ 0.03% at 1W, 1kHz |
+| SNR | ≥ 107 dB (A-weighted) |
+| Dynamic range | 106 dB (A-weighted) |
+| Crosstalk rejection | −100 dB at 1kHz (L↔R) |
+| Idle channel noise | < 40 µVRMS |
+
+### DSP feature set
+
+| Feature | Detail |
+|---|---|
+| Parametric EQ | 15 bands per channel, fully programmable biquad filters |
+| DRC | 3-band, 4th-order dynamic range compression |
+| AGL | Full-band automatic gain limiter |
+| Crossover / 2.1 | Output crossbar + subwoofer channel (5 BQs + dedicated DRC) |
+| Thermal foldback | Auto gain reduction at 135°C, auto-recovery when cool |
+| Volume range | +24 dB to −103 dB in 0.5 dB steps with soft ramp |
+| Modulation modes | BD (low EMI), 1SPW (high efficiency), Hybrid (ultra-low idle) |
+| Switching frequency | Configurable: 384 / 480 / 576 / 768 kHz |
+| Sample rates | 32 kHz, 44.1 kHz, 48 kHz, 88.2 kHz, 96 kHz (auto-detected) |
+
+### 15-band parametric EQ via alsamixer
+
+The parametric EQ is exposed directly through ALSA and accessible from the terminal — no GUI needed. Bands span 20 Hz to 16 kHz at standard 1/3-octave spacing.
 
 ```bash
 alsamixer
 ```
 
-Controls available depending on driver version: digital volume, analog gain, parametric EQ, mixer mode, modulation mode, bridge/PBTL mode.
+![SquarePi AlsaMixer EQ](docs/images/squarepi-alsamixer-eq.png)
 
-Driver source: [sonocotta/tas5805m-driver-for-raspbian](https://github.com/sonocotta/tas5805m-driver-for-raspbian)
+| Band | Frequency | Band | Frequency |
+|---|---|---|---|
+| 1 | 20 Hz | 9 | 800 Hz |
+| 2 | 32 Hz | 10 | 1250 Hz |
+| 3 | 50 Hz | 11 | 2000 Hz |
+| 4 | 80 Hz | 12 | 3150 Hz |
+| 5 | 125 Hz | 13 | 5000 Hz |
+| 6 | 200 Hz | 14 | 8000 Hz |
+| 7 | 315 Hz | 15 | 16000 Hz |
+| 8 | 500 Hz | | |
+
+Each band is a fully programmable biquad filter — shelving, peaking, notch, or crossover slopes can all be implemented by writing BQ coefficients over I²C.
+
+### Crossover and 2.1 mode
+
+SquarePi supports bi-amplification and 2.1 speaker configurations via the DSP output crossbar. The subwoofer channel gets its own 5-band EQ and dedicated DRC band — making it possible to drive a sub + satellite system from a single board.
+
+### Driver source
+
+[sonocotta/tas5805m-driver-for-raspbian](https://github.com/sonocotta/tas5805m-driver-for-raspbian)
 
 ---
 
