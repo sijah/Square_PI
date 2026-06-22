@@ -14,6 +14,9 @@
 
 set -euo pipefail
 
+# Capture script directory immediately — before any cd commands in the script
+SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
+
 # -----------------------------------------------------------------------------
 # Colour helpers
 # -----------------------------------------------------------------------------
@@ -35,15 +38,19 @@ box_line() { printf "  ║ %-44.44s ║\n" "$*"; }
 # Parse arguments
 # -----------------------------------------------------------------------------
 INSTALL_BT=0
+INSTALL_EQ=0
+INSTALL_DLNA=0
 for arg in "$@"; do
-  [[ "$arg" == "--with-bt" ]] && INSTALL_BT=1
+  [[ "$arg" == "--with-bt"   ]] && INSTALL_BT=1
+  [[ "$arg" == "--with-eq"   ]] && INSTALL_EQ=1
+  [[ "$arg" == "--with-dlna" ]] && INSTALL_DLNA=1
 done
 
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
-BRAND_TAGLINE="${SQUAREPI_TAGLINE:-DIY Raspberry Pi Hi-Fi Music Player}"
+BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
 PROJECT_URL="${SQUAREPI_PROJECT_URL:-https://github.com/sijah/Square_PI}"
 SUPPORT_URL="${SQUAREPI_SUPPORT_URL:-${PROJECT_URL}/issues}"
 RELEASE_FILE="/etc/squarepi-release"
@@ -62,14 +69,23 @@ ALSA_SINK="hw:LouderRaspberry,0"
 # -----------------------------------------------------------------------------
 # Banner
 # -----------------------------------------------------------------------------
-echo -e "${BOLD}"
+INSTALL_LINE="MPD · myMPD"
+[[ $INSTALL_BT   -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · Bluetooth"
+[[ $INSTALL_EQ   -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · EQ UI"
+[[ $INSTALL_DLNA -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · DLNA"
+
+echo -e "${BOLD}${CYAN}"
 echo "  ╔══════════════════════════════════════════════╗"
-box_line "${BRAND_NAME}"
-box_line "${BRAND_TAGLINE}"
-box_line "SquarePi HAT + MPD + myMPD"
-if [[ $INSTALL_BT -eq 1 ]]; then
-box_line "+ Bluetooth A2DP Receiver"
-fi
+echo "  ║                                              ║"
+echo "  ║   ┌──┐  ┌──┐  ┌──┐                           ║"
+echo "  ║   │  │  │  │  │  │  S Q U A R E  P I         ║"
+echo "  ║   │  └──┘  └──┘  └─────────────────          ║"
+echo "  ║                                              ║"
+echo "  ║   From square wave to every corner.          ║"
+echo "  ║                                              ║"
+echo "  ╠══════════════════════════════════════════════╣"
+printf "  ║  %-44s║\n" "${INSTALL_LINE}"
+echo "  ║                               by Sijah AK    ║"
 echo "  ╚══════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -210,12 +226,16 @@ apt-get install -y -qq \
   mpd \
   mpc \
   alsa-utils \
+  avahi-daemon \
   curl \
   git \
   build-essential \
   "${KERNEL_HEADERS_PKG}" || \
   warn "Kernel headers install failed — TAS5805M driver build may fail"
-success "Core packages installed"
+
+systemctl enable avahi-daemon 2>/dev/null || true
+systemctl restart avahi-daemon 2>/dev/null || true
+success "Core packages installed (mDNS via avahi-daemon enabled)"
 
 # -----------------------------------------------------------------------------
 # 8. Build and install TAS5805M kernel driver
@@ -345,6 +365,9 @@ audio_output {
 replaygain          "auto"
 volume_normalization "no"
 
+zeroconf_enabled    "yes"
+zeroconf_name       "${BRAND_NAME}"
+
 input {
     plugin          "curl"
 }
@@ -422,6 +445,53 @@ if systemctl is-active --quiet mympd; then
 else
   warn "myMPD may not have started. Check: journalctl -u mympd -n 20"
 fi
+
+# -----------------------------------------------------------------------------
+# 14a. Install myMPD EQ preset scripts
+# -----------------------------------------------------------------------------
+step "Installing EQ preset scripts into myMPD"
+
+MYMPD_SCRIPTS_DIR="/var/lib/mympd/scripts"
+mkdir -p "${MYMPD_SCRIPTS_DIR}"
+
+# Helper: writes one preset Lua script
+# Args: filename, band values (space-separated, -15 to 15 where 0=flat)
+write_eq_preset() {
+  local name="$1"; shift
+  local vals=("$@")
+  local bands=("00020 Hz" "00032 Hz" "00050 Hz" "00080 Hz" "00125 Hz"
+               "00200 Hz" "00315 Hz" "00500 Hz" "00800 Hz" "01250 Hz"
+               "02000 Hz" "03150 Hz" "05000 Hz" "08000 Hz" "16000 Hz")
+  local file="${MYMPD_SCRIPTS_DIR}/${name}.lua"
+  {
+    echo "-- SquarePi EQ preset: ${name}"
+    echo "local card = \"LouderRaspberry\""
+    for i in "${!bands[@]}"; do
+      echo "os.execute('amixer -c LouderRaspberry sset \"${bands[$i]}\" ${vals[$i]} 2>/dev/null')"
+    done
+    echo "os.execute('alsactl store 2>/dev/null')"
+  } > "${file}"
+  chmod 644 "${file}"
+}
+
+# ALSA range -15 to 15; 0 = flat (0 dB), 1 unit = 1 dB
+write_eq_preset "EQ Flat"        0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+write_eq_preset "EQ Bass Boost"  7  6  5  4  3  0  0  0  0  0  0  0  0  0  0
+write_eq_preset "EQ Treble"      0  0  0  0  0  0  0  0  0  2  3  4  5  6  6
+write_eq_preset "EQ Vocal"      -3 -3 -2 -1  0  2  3  3  2  1  0 -1 -2 -2 -2
+write_eq_preset "EQ Night Mode" -5 -5 -4 -2  0  0  0 -1 -1 -1 -1 -2 -3 -4 -4
+write_eq_preset "EQ Late Night"  6  5  3  1  0 -1 -1 -1  0  0  1  2  3  4  5
+write_eq_preset "EQ Rock"        5  4  3  2  1 -1 -2 -2 -1  1  2  3  4  5  5
+write_eq_preset "EQ Pop"         2  2  1  0 -1 -1  0  1  2  3  3  2  2  1  1
+write_eq_preset "EQ Jazz"        3  3  2  1  0  1  2  2  1  0 -1 -1 -2 -2 -3
+write_eq_preset "EQ Classical"   0  0  0  0  0  0  0  0  0  0  1  2  3  4  4
+write_eq_preset "EQ Club"        8  7  6  4  2 -1 -2 -2 -1  1  2  3  4  5  6
+write_eq_preset "EQ Hip-Hop"     7  7  6  5  3  1  0  0  1  2  2  2  3  3  2
+write_eq_preset "EQ Acoustic"   -2 -2  0  1  2  2  1  0  1  2  3  3  2  1  0
+
+# Restart myMPD so it picks up the new scripts
+systemctl restart mympd 2>/dev/null || true
+success "EQ presets installed — find them in myMPD under Scripts"
 
 # -----------------------------------------------------------------------------
 # 14. Prepare USB music mount point
@@ -696,11 +766,144 @@ success "Group permissions set"
 fi  # end INSTALL_BT
 
 # =============================================================================
+# ADVANCED EQ WEB SERVER (only if --with-eq passed)
+# =============================================================================
+if [[ $INSTALL_EQ -eq 1 ]]; then
+
+step "[EQ] Installing advanced EQ web server"
+
+# Require Python 3 (already on RPi OS Bookworm/Trixie)
+if ! command -v python3 &>/dev/null; then
+  apt-get install -y -qq python3
+fi
+
+EQ_SERVER_DEST="/usr/local/bin/squarepi-eq-server.py"
+
+# Locate eq-server.py — check next to install.sh first, then GitHub
+if [[ -f "${SCRIPT_DIR}/eq-server.py" ]]; then
+  cp "${SCRIPT_DIR}/eq-server.py" "${EQ_SERVER_DEST}"
+else
+  # Fallback: download from GitHub if running via curl pipe
+  curl -fsSL "https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/eq-server.py" \
+    -o "${EQ_SERVER_DEST}" || error "Could not fetch eq-server.py"
+fi
+
+chmod +x "${EQ_SERVER_DEST}"
+success "EQ server installed to ${EQ_SERVER_DEST}"
+
+# systemd unit for EQ server
+cat > /etc/systemd/system/squarepi-eq.service <<EOF
+[Unit]
+Description=SquarePi Advanced EQ Web Server
+After=network.target sound.target
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sleep 5
+ExecStart=/usr/bin/python3 ${EQ_SERVER_DEST}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Separate one-shot unit: restore ALSA EQ state on boot
+cat > /etc/systemd/system/squarepi-alsa-restore.service <<EOF
+[Unit]
+Description=SquarePi ALSA state restore
+After=sound.target
+Before=mpd.service squarepi-eq.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/alsactl restore
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable squarepi-alsa-restore
+systemctl enable squarepi-eq
+systemctl start squarepi-eq
+sleep 2
+
+if systemctl is-active --quiet squarepi-eq; then
+  success "EQ web server running on port 8081"
+else
+  warn "EQ server not running yet — it needs audio card (available after reboot)"
+fi
+
+EQ_HTTP_PORT="8081"
+
+fi  # end INSTALL_EQ
+
+# =============================================================================
+# DLNA/UPnP RENDERER (only if --with-dlna passed)
+# =============================================================================
+if [[ $INSTALL_DLNA -eq 1 ]]; then
+
+step "[DLNA] Adding upmpdcli repository"
+
+# Fetch GPG key from Ubuntu keyserver using known fingerprint
+gpg --keyserver keyserver.ubuntu.com --recv-keys F8E3347256922A8AE767605B7808CE96D38B9201 \
+  || error "Failed to fetch upmpdcli GPG key"
+gpg --export F8E3347256922A8AE767605B7808CE96D38B9201 \
+  | gpg --dearmor -o /usr/share/keyrings/upmpdcli.gpg
+
+OS_CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
+echo "deb [signed-by=/usr/share/keyrings/upmpdcli.gpg] http://www.lesbonscomptes.com/upmpdcli/downloads/raspbian/ ${OS_CODENAME} main" \
+  > /etc/apt/sources.list.d/upmpdcli.list
+
+apt-get update -qq
+success "upmpdcli repository added (${OS_CODENAME})"
+
+step "[DLNA] Installing upmpdcli UPnP/DLNA renderer"
+
+apt-get install -y -qq upmpdcli || error "upmpdcli install failed"
+success "upmpdcli installed"
+
+step "[DLNA] Configuring upmpdcli"
+
+cat > /etc/upmpdcli.conf <<EOF
+# SquarePi UPnP/DLNA renderer
+# Generated by squarepi-installer
+
+friendlyname     = ${BRAND_NAME}
+mpdhost          = localhost
+mpdport          = 6600
+logfilename      = /var/log/upmpdcli.log
+loglevel         = 2
+EOF
+
+chmod 644 /etc/upmpdcli.conf
+success "upmpdcli configured as '${BRAND_NAME}'"
+
+step "[DLNA] Enabling upmpdcli service"
+systemctl daemon-reload
+systemctl enable upmpdcli
+systemctl restart upmpdcli
+sleep 2
+
+if systemctl is-active --quiet upmpdcli; then
+  success "upmpdcli running — SquarePi visible as DLNA renderer on the network"
+else
+  warn "upmpdcli not running yet — check: journalctl -u upmpdcli -n 20"
+fi
+
+DLNA_HTTP_PORT="8200"
+
+fi  # end INSTALL_DLNA
+
+# =============================================================================
 # Final summary
 # =============================================================================
 trap - EXIT
 
 PI_IP=$(hostname -I | awk '{print $1}')
+MDNS_HOST="${HOSTNAME_REQUESTED:-$(hostname)}"
 
 echo ""
 echo -e "${BOLD}${GREEN}"
@@ -709,16 +912,20 @@ box_line "${BRAND_NAME} is ready"
 echo "  ╚══════════════════════════════════════════════╝"
 echo -e "${NC}"
 echo -e "  ${BOLD}myMPD Web UI:${NC}   http://${PI_IP}:${MYMPD_HTTP_PORT}"
-if [[ -n "${HOSTNAME_REQUESTED}" ]]; then
-echo -e "  ${BOLD}mDNS URL:${NC}       http://${HOSTNAME_REQUESTED}.local:${MYMPD_HTTP_PORT}"
-fi
-echo -e "  ${BOLD}MPD Port:${NC}       ${PI_IP}:6600"
+echo -e "  ${BOLD}mDNS URL:${NC}       http://${MDNS_HOST}.local:${MYMPD_HTTP_PORT}  ${CYAN}(no IP needed)${NC}"
+echo -e "  ${BOLD}MPD (apps):${NC}     ${PI_IP}:6600  or  ${MDNS_HOST}.local:6600"
 echo -e "  ${BOLD}Music folder:${NC}   ${MPD_MUSIC_DIR}"
 echo -e "  ${BOLD}USB mount:${NC}      ${USB_MUSIC_DIR}"
 echo -e "  ${BOLD}Boot backup:${NC}    ${CONFIG_BACKUP}"
 echo -e "  ${BOLD}Release file:${NC}   ${RELEASE_FILE}"
 echo -e "  ${BOLD}Docs:${NC}           ${PROJECT_URL}"
 echo -e "  ${BOLD}Support:${NC}        ${SUPPORT_URL}"
+if [[ $INSTALL_EQ -eq 1 ]]; then
+echo ""
+echo -e "  ${BOLD}Advanced EQ:${NC}    http://${PI_IP}:${EQ_HTTP_PORT:-8081}"
+echo -e "  ${BOLD}EQ mDNS:${NC}        http://${MDNS_HOST}.local:${EQ_HTTP_PORT:-8081}"
+echo -e "  ${CYAN}EQ presets also available in myMPD under Scripts.${NC}"
+fi
 
 if [[ $INSTALL_BT -eq 1 ]]; then
 echo ""

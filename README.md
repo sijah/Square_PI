@@ -4,6 +4,10 @@ You already have a Raspberry Pi. You have speakers. SquarePi is the missing piec
 
 One installer. MPD + myMPD out of the box. Optional Bluetooth A2DP. Designed to just work.
 
+*From square wave to every corner.*
+
+**Author:** Sijah AK
+
 And when you want to go deeper — a **15-band parametric EQ** is right there in the terminal, exposed directly through ALSA by the SquarePi onboard DSP. No app, no cloud, no subscription. Just `alsamixer` and full control over your sound. Under the hood, SquarePi packs a full DSP suite — multiband DRC, automatic gain limiting, crossover routing for 2.1 setups, and thermal foldback — all tunable over I²C without touching a single potentiometer.
 
 ---
@@ -168,14 +172,29 @@ MPD + myMPD + Bluetooth A2DP:
 curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-bt
 ```
 
+MPD + myMPD + Advanced EQ web interface:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-eq
+```
+
+All options together:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-bt --with-eq
+```
+
 Or clone and run locally:
 
 ```bash
 git clone https://github.com/sijah/Square_PI.git
 cd Square_PI/squarepi-installer
 
-sudo bash install.sh            # MPD + myMPD only
-sudo bash install.sh --with-bt  # MPD + myMPD + Bluetooth
+sudo bash install.sh                                  # MPD + myMPD only
+sudo bash install.sh --with-bt                        # + Bluetooth
+sudo bash install.sh --with-eq                        # + Advanced EQ UI
+sudo bash install.sh --with-dlna                      # + DLNA/UPnP renderer
+sudo bash install.sh --with-bt --with-eq --with-dlna  # everything
 ```
 
 The script does not reboot automatically by default. Reboot manually after it finishes:
@@ -224,6 +243,54 @@ With `--with-bt`, the installer additionally:
 - Unblocks the Bluetooth adapter via `rfkill` and persists the unblock in `/etc/rc.local`
 - Installs a systemd pairing agent that auto-accepts all pair requests with no PIN
 - Enables the stock `bluealsa-aplay` service to route A2DP audio to SquarePi
+
+---
+
+## Network access — no IP address needed
+
+The installer sets up **mDNS (Avahi/Zeroconf)** so SquarePi is reachable by hostname on any local network — no need to look up an IP address.
+
+| What | Address |
+|---|---|
+| myMPD web UI | `http://squarepi.local:8080` |
+| Advanced EQ (if `--with-eq`) | `http://squarepi.local:8081` |
+| MPD (music apps) | `squarepi.local:6600` |
+| DLNA renderer (if `--with-dlna`) | appears in Chrome cast menu as "SquarePi" |
+
+Set the hostname during install with `SQUAREPI_HOSTNAME=squarepi` to get clean `.local` URLs.
+
+MPD also advertises itself via **Zeroconf** (`_mpd._tcp`). Android and desktop MPD apps such as [M.A.L.P](https://f-droid.org/packages/org.gateshipone.malp/), MPDroid, and Cantata can auto-discover SquarePi — no IP or manual server entry required.
+
+---
+
+## DSP and EQ — two ways to control it
+
+### For everyone: EQ presets in myMPD
+
+Five EQ presets are available directly in the myMPD web UI under **Scripts**:
+
+| Preset | Character |
+|---|---|
+| EQ Flat | Neutral, no coloration |
+| EQ Bass Boost | Warm bass emphasis |
+| EQ Vocal | Mid-forward, clear voices |
+| EQ Night | Gentle, low-fatigue listening |
+| EQ Treble | Bright, air and detail |
+
+Tap a preset — it applies instantly and saves automatically.
+
+### For power users: Advanced DSP web interface (`--with-eq`)
+
+Install with `--with-eq` to get a full DSP control page at `http://squarepi.local:8081`.
+
+| Section | Controls |
+|---|---|
+| Gain & Balance | Analog gain trim, L/R balance |
+| EQ | Bypass toggle, 13 presets, 15-band sliders (20 Hz – 16 kHz) |
+| Mixer | Stereo / Mono / Left only / Right only / Custom matrix |
+| System | Live fault indicators, thermal warnings, save settings |
+
+Changes apply to the TAS5805M DSP hardware in real time. The **Save** button persists settings across reboots via `alsactl`. Volume is controlled by myMPD via MPD software mixer.
 
 ---
 

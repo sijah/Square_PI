@@ -243,7 +243,49 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 10. Remove SquarePi release metadata
+# 10. Remove EQ server (if installed)
+# -----------------------------------------------------------------------------
+step "Removing EQ server (if installed)"
+
+for svc in squarepi-eq squarepi-alsa-restore; do
+  if systemctl is-active --quiet "${svc}" 2>/dev/null; then
+    systemctl stop "${svc}"
+  fi
+  if systemctl is-enabled --quiet "${svc}" 2>/dev/null; then
+    systemctl disable "${svc}"
+  fi
+  rm -f "/etc/systemd/system/${svc}.service"
+done
+
+rm -f /usr/local/bin/squarepi-eq-server.py
+rm -f /var/lib/mympd/scripts/EQ*.lua
+systemctl daemon-reload
+info "EQ server and preset scripts removed"
+
+# -----------------------------------------------------------------------------
+# 11. Remove DLNA renderer (if installed)
+# -----------------------------------------------------------------------------
+step "Removing DLNA renderer (if installed)"
+
+if systemctl is-active --quiet upmpdcli 2>/dev/null; then
+  systemctl stop upmpdcli
+fi
+if systemctl is-enabled --quiet upmpdcli 2>/dev/null; then
+  systemctl disable upmpdcli
+fi
+if dpkg -l upmpdcli &>/dev/null 2>&1; then
+  apt-get remove -y -qq upmpdcli
+  apt-get autoremove -y -qq
+  info "upmpdcli removed"
+fi
+rm -f /etc/upmpdcli.conf
+rm -f /etc/apt/sources.list.d/upmpdcli.list
+rm -f /usr/share/keyrings/upmpdcli.gpg
+systemctl daemon-reload
+info "DLNA renderer removed"
+
+# -----------------------------------------------------------------------------
+# 13. Remove SquarePi release metadata
 # -----------------------------------------------------------------------------
 step "Removing SquarePi release metadata"
 if [[ -f /etc/squarepi-release ]]; then
@@ -254,7 +296,7 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 11. Final summary
+# 14. Final summary
 # -----------------------------------------------------------------------------
 echo ""
 echo -e "${BOLD}${GREEN}"
@@ -270,6 +312,8 @@ echo -e "    ✓ Boot overlay (config.txt)"
 echo -e "    ✓ apt repository and GPG key"
 echo ""
 echo -e "  ${YELLOW}A reboot is recommended to fully unload the driver.${NC}"
+echo ""
+echo -e "  Thanks for trying SquarePi. — ${BOLD}Sijah AK${NC}"
 echo ""
 read -r -p "  Reboot now? [y/N] " REBOOT_NOW
 if [[ "${REBOOT_NOW}" =~ ^[Yy]$ ]]; then
