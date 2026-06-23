@@ -672,6 +672,7 @@ function dbStr(v) {
   return (parseFloat(n) >= 0 ? '+' : '') + n;
 }
 function freqShort(lbl) {
+  if (lbl.includes('k')) return lbl;
   const hz = parseInt(lbl);
   if (hz >= 10000) return (hz/1000).toFixed(0)+'k';
   if (hz >= 1000)  return (hz/1000).toFixed(1)+'k';
@@ -935,8 +936,6 @@ function setGainDisplay(v) {
 }
 function onGain(v) {
   setGainDisplay(v);
-  updateMasterDisplay(parseInt(v));
-  drawKnob(parseInt(v));
   post('/api/gain', {value: parseInt(v)});
 }
 
@@ -1026,8 +1025,6 @@ function loadState() {
     const gainSl = document.getElementById('sl-gain');
     const gv = s.gain ?? 31;
     if (gainSl) { gainSl.value = gv; setGainDisplay(gv); }
-    updateMasterDisplay(gv);
-    drawKnob(gv);
     const balSl = document.getElementById('sl-bal');
     if (balSl) { balSl.value = s.balance ?? 0; setBalDisplay(balSl.value); }
     setEqBypass(s.eq_enabled !== false);
@@ -1038,92 +1035,6 @@ function loadState() {
   }).catch(() => { buildEq(null); buildFaults(null); });
   loadSysInfo();
 }
-
-// ── Volume knob ────────────────────────────────────────────────────────────────
-let knobGain = 31, isMuted = false, savedGain = 31, knobDragging = false, knobStartY = 0, knobStartVal = 31;
-
-function updateMasterDisplay(v) {
-  const db = ((parseInt(v) - 31) * 0.5).toFixed(1);
-  const el = document.getElementById('v-master-db');
-  if (el) el.textContent = (db >= 0 ? '+' : '') + db + ' dB';
-}
-
-function drawKnob(v) {
-  knobGain = parseInt(v);
-  const canvas = document.getElementById('vol-knob');
-  if (!canvas) return;
-  const dpr = window.devicePixelRatio || 1;
-  const sz = 82;
-  canvas.width = sz * dpr; canvas.height = sz * dpr;
-  canvas.style.width = sz + 'px'; canvas.style.height = sz + 'px';
-  const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-  const cx = sz/2, cy = sz/2, r = cx - 10;
-  ctx.clearRect(0, 0, sz, sz);
-  const startA = Math.PI * 0.75, fullA = Math.PI * 1.5;
-  /* track */
-  ctx.beginPath(); ctx.arc(cx, cy, r, startA, startA + fullA);
-  ctx.strokeStyle = '#1a2535'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.stroke();
-  /* value arc */
-  const valA = startA + (knobGain / 31) * fullA;
-  if (knobGain > 0) {
-    ctx.beginPath(); ctx.arc(cx, cy, r, startA, valA);
-    ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.stroke();
-  }
-  /* tick indicator */
-  ctx.save();
-  ctx.translate(cx, cy); ctx.rotate(valA);
-  ctx.beginPath(); ctx.moveTo(r - 13, 0); ctx.lineTo(r - 3, 0);
-  ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.stroke();
-  ctx.restore();
-  /* center cap */
-  ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI*2);
-  ctx.fillStyle = '#0a0e14'; ctx.fill();
-  ctx.strokeStyle = '#253040'; ctx.lineWidth = 1.5; ctx.stroke();
-}
-
-function initKnob() {
-  const canvas = document.getElementById('vol-knob');
-  if (!canvas) return;
-  canvas.addEventListener('mousedown', e => {
-    knobDragging = true; knobStartY = e.clientY; knobStartVal = knobGain; e.preventDefault();
-  });
-  window.addEventListener('mousemove', e => {
-    if (!knobDragging) return;
-    const nv = Math.max(0, Math.min(31, Math.round(knobStartVal + (knobStartY - e.clientY) / 3.5)));
-    if (nv !== knobGain) {
-      drawKnob(nv); updateMasterDisplay(nv);
-      post('/api/gain', {value: nv});
-      const sl = document.getElementById('sl-gain');
-      if (sl) { sl.value = nv; setGainDisplay(nv); }
-    }
-  });
-  window.addEventListener('mouseup', () => { knobDragging = false; });
-  canvas.addEventListener('wheel', e => {
-    e.preventDefault();
-    const nv = Math.max(0, Math.min(31, knobGain + (e.deltaY < 0 ? 1 : -1)));
-    drawKnob(nv); updateMasterDisplay(nv);
-    post('/api/gain', {value: nv});
-    const sl = document.getElementById('sl-gain');
-    if (sl) { sl.value = nv; setGainDisplay(nv); }
-  }, {passive: false});
-}
-
-function toggleMute() {
-  const btn = document.getElementById('mute-btn');
-  if (!isMuted) {
-    savedGain = knobGain; isMuted = true;
-    if (btn) btn.classList.add('muted');
-    drawKnob(0); updateMasterDisplay(0); post('/api/gain', {value: 0});
-    const sl = document.getElementById('sl-gain'); if (sl) { sl.value = 0; setGainDisplay(0); }
-  } else {
-    isMuted = false;
-    if (btn) btn.classList.remove('muted');
-    drawKnob(savedGain); updateMasterDisplay(savedGain); post('/api/gain', {value: savedGain});
-    const sl = document.getElementById('sl-gain'); if (sl) { sl.value = savedGain; setGainDisplay(savedGain); }
-  }
-}
-
 
 // ── Sysinfo ────────────────────────────────────────────────────────────────────
 function loadSysInfo() {
@@ -1155,7 +1066,6 @@ setInterval(() => {
 }, 10000);
 window.addEventListener('resize', drawCurve);
 setInterval(loadSysInfo, 8000);
-initKnob();
 loadState();
 </script>
 </body>

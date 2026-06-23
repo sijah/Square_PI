@@ -30,9 +30,11 @@ step()    { echo -e "\n${BOLD}${CYAN}>>> $*${NC}"; }
 # Banner
 # -----------------------------------------------------------------------------
 echo -e "${BOLD}"
+INSTALLER_VER="1.1.0"
+
 echo "  ╔══════════════════════════════════════════════╗"
 echo "  ║         SquarePi Software Uninstaller        ║"
-echo "  ║   Removes SquarePi audio, MPD and myMPD      ║"
+printf "  ║  %-30s by Sijah AK  ║\n" "v${INSTALLER_VER}"
 echo "  ╚══════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -237,7 +239,7 @@ if [[ -f "${CONFIG_FILE}" ]]; then
     info "Re-enabled onboard audio"
   fi
 
-success "config.txt restored"
+  success "config.txt restored"
 else
   warn "config.txt not found — skipping boot config restore"
 fi
@@ -247,7 +249,7 @@ fi
 # -----------------------------------------------------------------------------
 step "Removing EQ server (if installed)"
 
-for svc in squarepi-eq squarepi-alsa-restore; do
+for svc in squarepi-eq squarepi-alsa-restore squarepi-eq-init; do
   if systemctl is-active --quiet "${svc}" 2>/dev/null; then
     systemctl stop "${svc}"
   fi
@@ -258,9 +260,11 @@ for svc in squarepi-eq squarepi-alsa-restore; do
 done
 
 rm -f /usr/local/bin/squarepi-eq-server.py
+rm -f /usr/local/bin/squarepi-eq-init.sh
+rm -f /etc/squarepi-initialized
 rm -f /var/lib/mympd/scripts/EQ*.lua
 systemctl daemon-reload
-info "EQ server and preset scripts removed"
+info "EQ server, init service and preset scripts removed"
 
 # -----------------------------------------------------------------------------
 # 11. Remove DLNA renderer (if installed)
@@ -285,7 +289,7 @@ systemctl daemon-reload
 info "DLNA renderer removed"
 
 # -----------------------------------------------------------------------------
-# 13. Remove SquarePi release metadata
+# 12. Remove SquarePi release metadata
 # -----------------------------------------------------------------------------
 step "Removing SquarePi release metadata"
 if [[ -f /etc/squarepi-release ]]; then
@@ -296,7 +300,7 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 14. Final summary
+# 13. Final summary
 # -----------------------------------------------------------------------------
 echo ""
 echo -e "${BOLD}${GREEN}"

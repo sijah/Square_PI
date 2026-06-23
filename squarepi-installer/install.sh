@@ -49,6 +49,8 @@ done
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
+INSTALLER_VER="1.1.0"
+
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
 PROJECT_URL="${SQUAREPI_PROJECT_URL:-https://github.com/sijah/Square_PI}"
@@ -64,7 +66,7 @@ MYMPD_HTTP_PORT="8080"
 CONFIG_BACKUP=""
 
 BT_DEVICE_NAME="${SQUAREPI_BT_NAME:-${BRAND_NAME}}"
-ALSA_SINK="hw:LouderRaspberry,0"
+ALSA_SINK="plughw:LouderRaspberry,0"
 
 # -----------------------------------------------------------------------------
 # Banner
@@ -85,7 +87,7 @@ echo "  ║   From square wave to every corner.          ║"
 echo "  ║                                              ║"
 echo "  ╠══════════════════════════════════════════════╣"
 printf "  ║  %-44s║\n" "${INSTALL_LINE}"
-echo "  ║                               by Sijah AK    ║"
+printf "  ║  %-30s by Sijah AK  ║\n" "installer v${INSTALLER_VER}"
 echo "  ╚══════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -118,8 +120,8 @@ for BUS in 1 2; do
 done
 
 if [[ -z "${TAS_I2C_ADDR}" ]]; then
-  warn "TAS5805M not detected on I2C. Defaulting to 0x2c."
-  warn "Check HAT seating and verify with: i2cdetect -y 1"
+  warn "TAS5805M not detected on I2C — this is normal on first install (I2C not yet enabled in boot config)."
+  warn "Defaulting to 0x2c. After reboot verify with: i2cdetect -y 1"
   TAS_I2C_ADDR="0x2c"
 else
   success "Using I2C address: ${TAS_I2C_ADDR}"
@@ -134,7 +136,7 @@ step "Checking operating system"
 
 . /etc/os-release
 
-if [[ "${ID}" != "debian" && "${ID_LIKE}" != *"debian"* ]]; then
+if [[ "${ID}" != "debian" && "${ID_LIKE:-}" != *"debian"* ]]; then
   error "This installer requires Raspberry Pi OS (Debian-based). Detected: ${ID}"
 fi
 
@@ -165,9 +167,19 @@ if [[ -n "${HOSTNAME_REQUESTED}" ]]; then
     if [[ "${CURRENT_HOSTNAME}" == "${HOSTNAME_REQUESTED}" ]]; then
       info "Hostname already set to ${HOSTNAME_REQUESTED}"
     else
-      hostnamectl set-hostname "${HOSTNAME_REQUESTED}" && \
-        success "Hostname set to ${HOSTNAME_REQUESTED}" || \
+      if hostnamectl set-hostname "${HOSTNAME_REQUESTED}"; then
+        # Keep /etc/hosts in sync — avoids "sudo: unable to resolve host" warnings
+        if grep -q "^127\.0\.1\.1" /etc/hosts; then
+          sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t${HOSTNAME_REQUESTED}/" /etc/hosts
+        else
+          echo -e "127.0.1.1\t${HOSTNAME_REQUESTED}" >> /etc/hosts
+        fi
+        # Remove any stale entry for the old hostname (127.0.0.1 line sometimes has it)
+        sed -i "s/\b${CURRENT_HOSTNAME}\b/${HOSTNAME_REQUESTED}/g" /etc/hosts
+        success "Hostname set to ${HOSTNAME_REQUESTED} (/etc/hostname + /etc/hosts updated)"
+      else
         warn "Could not set hostname to ${HOSTNAME_REQUESTED}"
+      fi
     fi
   else
     warn "hostnamectl not available — skipping hostname change"
@@ -263,9 +275,12 @@ success "TAS5805M driver built and installed"
 # -----------------------------------------------------------------------------
 step "Configuring boot overlay"
 
-OVERLAY_DIR="/boot/overlays"
-if [[ ! -f "${OVERLAY_DIR}/tas58xx.dtbo" ]]; then
-  error "tas58xx.dtbo was not installed in ${OVERLAY_DIR}; refusing to edit boot config"
+OVERLAY_DIR=""
+for _d in /boot/firmware/overlays /boot/overlays; do
+  [[ -f "${_d}/tas58xx.dtbo" ]] && { OVERLAY_DIR="${_d}"; break; }
+done
+if [[ -z "${OVERLAY_DIR}" ]]; then
+  error "tas58xx.dtbo not found in /boot/firmware/overlays or /boot/overlays; refusing to edit boot config"
 fi
 
 # Detect boot config location (Bookworm uses /boot/firmware/)
@@ -376,6 +391,7 @@ EOF
 success "MPD configured at /etc/mpd.conf"
 
 info "Validating MPD configuration..."
+systemctl stop mpd 2>/dev/null || true   # ensure port 6600 is free for the test
 MPD_TEST_LOG="/tmp/mpd_test.log"
 set +e
 timeout 10s mpd --no-daemon --stdout /etc/mpd.conf >"${MPD_TEST_LOG}" 2>&1
@@ -398,6 +414,7 @@ sleep 2
 if systemctl is-active --quiet mpd; then
   success "MPD is running"
   mpc update || true
+  mpc volume 25 2>/dev/null || true   # safe default — avoids full-blast on first play
 else
   warn "MPD may not have started correctly. Check: journalctl -u mpd -n 20"
 fi
@@ -447,7 +464,7 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 14a. Install myMPD EQ preset scripts
+# 14. Install myMPD EQ preset scripts
 # -----------------------------------------------------------------------------
 step "Installing EQ preset scripts into myMPD"
 
@@ -465,7 +482,6 @@ write_eq_preset() {
   local file="${MYMPD_SCRIPTS_DIR}/${name}.lua"
   {
     echo "-- SquarePi EQ preset: ${name}"
-    echo "local card = \"LouderRaspberry\""
     for i in "${!bands[@]}"; do
       echo "os.execute('amixer -c LouderRaspberry sset \"${bands[$i]}\" ${vals[$i]} 2>/dev/null')"
     done
@@ -494,7 +510,7 @@ systemctl restart mympd 2>/dev/null || true
 success "EQ presets installed — find them in myMPD under Scripts"
 
 # -----------------------------------------------------------------------------
-# 14. Prepare USB music mount point
+# 15. Prepare USB music mount point
 # -----------------------------------------------------------------------------
 step "Preparing USB music mount point"
 mkdir -p "${USB_MUSIC_DIR}"
@@ -512,22 +528,65 @@ info "USB drives are not auto-mounted by this installer."
 info "Mount a drive at ${USB_MUSIC_DIR}, then set MPD music_directory to that path if desired."
 
 # -----------------------------------------------------------------------------
-# 15. Write SquarePi release metadata
+# 16. First-boot EQ initialisation (flat, runs once after driver loads)
+# -----------------------------------------------------------------------------
+step "Installing first-boot EQ initialisation service"
+
+cat > /usr/local/bin/squarepi-eq-init.sh <<'INITEOF'
+#!/bin/bash
+# Sets all 15 EQ bands to 0 dB (flat) on first boot, then marks itself done.
+CARD="LouderRaspberry"
+BANDS=("00020 Hz" "00032 Hz" "00050 Hz" "00080 Hz" "00125 Hz" "00200 Hz"
+       "00315 Hz" "00500 Hz" "00800 Hz" "01250 Hz" "02000 Hz" "03150 Hz"
+       "05000 Hz" "08000 Hz" "16000 Hz")
+
+for b in "${BANDS[@]}"; do
+  amixer -c "$CARD" sset "$b" 0 2>/dev/null || true
+done
+alsactl store 2>/dev/null || true
+touch /etc/squarepi-initialized
+INITEOF
+chmod +x /usr/local/bin/squarepi-eq-init.sh
+
+cat > /etc/systemd/system/squarepi-eq-init.service <<'UNITEOF'
+[Unit]
+Description=SquarePi first-boot EQ initialisation (flat)
+After=sound.target
+ConditionPathExists=!/etc/squarepi-initialized
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/squarepi-eq-init.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+
+systemctl daemon-reload
+systemctl enable squarepi-eq-init
+success "First-boot EQ init service installed (runs once after reboot)"
+
+# -----------------------------------------------------------------------------
+# 17. Write SquarePi release metadata
 # -----------------------------------------------------------------------------
 step "Writing ${BRAND_NAME} release metadata"
 cat > "${RELEASE_FILE}" <<EOF
 NAME="${BRAND_NAME}"
 TAGLINE="${BRAND_TAGLINE}"
-VERSION=1.0
+VERSION=${INSTALLER_VER}
 HARDWARE="SquarePi HAT"
 PROJECT_URL="${PROJECT_URL}"
 SUPPORT_URL="${SUPPORT_URL}"
 INSTALL_DATE="$(date -Iseconds)"
+HOSTNAME="${HOSTNAME_REQUESTED:-$(hostname)}"
 MPD_MUSIC_DIR="${MPD_MUSIC_DIR}"
 USB_MUSIC_DIR="${USB_MUSIC_DIR}"
 MYMPD_HTTP_PORT="${MYMPD_HTTP_PORT}"
 BLUETOOTH_ENABLED=${INSTALL_BT}
 BLUETOOTH_NAME="${BT_DEVICE_NAME}"
+EQ_ENABLED=${INSTALL_EQ}
+DLNA_ENABLED=${INSTALL_DLNA}
 EOF
 chmod 644 "${RELEASE_FILE}"
 success "Release metadata written to ${RELEASE_FILE}"
@@ -570,8 +629,7 @@ success "Bluetooth packages installed"
 step "[BT] Configuring BlueALSA service"
 
 # Detect bluealsa version to pick correct flag syntax
-BLUEALSA_VER=$(bluealsa --version 2>&1 | grep -oP '\d+\.\d+' | head -1 || echo "0.0")
-BLUEALSA_MAJOR=$(echo "$BLUEALSA_VER" | cut -d. -f1)
+BLUEALSA_VER=$(bluealsa --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "0.0")
 
 mkdir -p /etc/systemd/system/bluealsa.service.d
 
@@ -760,7 +818,13 @@ fi
 # -----------------------------------------------------------------------------
 step "[BT] Setting audio group permissions"
 usermod -aG audio bluetooth 2>/dev/null || true
-usermod -aG bluetooth "${SUDO_USER:-pi}" 2>/dev/null || true
+TARGET_USER="${SUDO_USER:-$(logname 2>/dev/null || echo '')}"
+if [[ -n "${TARGET_USER}" ]] && id "${TARGET_USER}" &>/dev/null 2>&1; then
+  usermod -aG bluetooth "${TARGET_USER}" 2>/dev/null || true
+  info "Added ${TARGET_USER} to bluetooth group"
+else
+  warn "Could not detect logged-in user — add yourself to the bluetooth group manually: sudo usermod -aG bluetooth \$USER"
+fi
 success "Group permissions set"
 
 fi  # end INSTALL_BT
@@ -801,6 +865,7 @@ After=network.target sound.target
 Type=simple
 ExecStartPre=/bin/sleep 5
 ExecStart=/usr/bin/python3 ${EQ_SERVER_DEST}
+ExecStop=/usr/sbin/alsactl store
 Restart=on-failure
 RestartSec=5
 
@@ -847,18 +912,37 @@ if [[ $INSTALL_DLNA -eq 1 ]]; then
 
 step "[DLNA] Adding upmpdcli repository"
 
-# Fetch GPG key from Ubuntu keyserver using known fingerprint
-gpg --keyserver keyserver.ubuntu.com --recv-keys F8E3347256922A8AE767605B7808CE96D38B9201 \
-  || error "Failed to fetch upmpdcli GPG key"
-gpg --export F8E3347256922A8AE767605B7808CE96D38B9201 \
-  | gpg --dearmor -o /usr/share/keyrings/upmpdcli.gpg
+UPMPDCLI_KEY="/usr/share/keyrings/upmpdcli.gpg"
+UPMPDCLI_FINGERPRINT="F8E3347256922A8AE767605B7808CE96D38B9201"
+
+# Try multiple keyservers in case one is unreachable
+UPMPDCLI_KEY_OK=0
+for KS in keyserver.ubuntu.com keys.openpgp.org hkps://keyserver.ubuntu.com; do
+  if gpg --keyserver "${KS}" --recv-keys "${UPMPDCLI_FINGERPRINT}" 2>/dev/null; then
+    gpg --export "${UPMPDCLI_FINGERPRINT}" | gpg --dearmor -o "${UPMPDCLI_KEY}"
+    UPMPDCLI_KEY_OK=1
+    break
+  fi
+done
+[[ ${UPMPDCLI_KEY_OK} -eq 0 ]] && error "Could not fetch upmpdcli GPG key from any keyserver. Check internet access."
 
 OS_CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
-echo "deb [signed-by=/usr/share/keyrings/upmpdcli.gpg] http://www.lesbonscomptes.com/upmpdcli/downloads/raspbian/ ${OS_CODENAME} main" \
-  > /etc/apt/sources.list.d/upmpdcli.list
 
-apt-get update -qq
-success "upmpdcli repository added (${OS_CODENAME})"
+# upmpdcli may not publish packages for every Debian/Pi OS version — fall back to bookworm
+for CODENAME in "${OS_CODENAME}" bookworm; do
+  echo "deb [signed-by=${UPMPDCLI_KEY}] http://www.lesbonscomptes.com/upmpdcli/downloads/raspbian/ ${CODENAME} main" \
+    > /etc/apt/sources.list.d/upmpdcli.list
+  if apt-get update -qq 2>/dev/null && apt-cache show upmpdcli &>/dev/null 2>&1; then
+    success "upmpdcli repository added (${CODENAME})"
+    OS_CODENAME="${CODENAME}"
+    break
+  fi
+  warn "upmpdcli repo for '${CODENAME}' did not work — trying fallback"
+done
+
+if ! apt-cache show upmpdcli &>/dev/null 2>&1; then
+  error "upmpdcli not available for this OS version. Install manually from lesbonscomptes.com/upmpdcli"
+fi
 
 step "[DLNA] Installing upmpdcli UPnP/DLNA renderer"
 
@@ -925,6 +1009,12 @@ echo ""
 echo -e "  ${BOLD}Advanced EQ:${NC}    http://${PI_IP}:${EQ_HTTP_PORT:-8081}"
 echo -e "  ${BOLD}EQ mDNS:${NC}        http://${MDNS_HOST}.local:${EQ_HTTP_PORT:-8081}"
 echo -e "  ${CYAN}EQ presets also available in myMPD under Scripts.${NC}"
+fi
+
+if [[ $INSTALL_DLNA -eq 1 ]]; then
+echo ""
+echo -e "  ${BOLD}DLNA renderer:${NC}  http://${PI_IP}:${DLNA_HTTP_PORT:-8200}"
+echo -e "  ${BOLD}DLNA mDNS:${NC}      http://${MDNS_HOST}.local:${DLNA_HTTP_PORT:-8200}"
 fi
 
 if [[ $INSTALL_BT -eq 1 ]]; then
