@@ -2,7 +2,7 @@
 
 SquarePi is an open-source Raspberry Pi audio streamer with a built-in 2×30W DSP amplifier. One installer turns any Pi into a headless network player — no config files, no IP addresses to remember.
 
-**Stream from:** Bluetooth · Spotify Connect · AirPlay · DLNA · MPD  
+**Stream from:** Bluetooth · DLNA · MPD  
 **Control with:** 15-band EQ web interface · EQ presets · Sleep timer · Real-time fault monitor
 
 *From square wave to every corner.* — Sijah AK
@@ -106,22 +106,6 @@ Adds a full-page DSP control panel at `http://squarepi.local:8081` — 15-band E
 curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-eq
 ```
 
-### With Spotify Connect
-
-Stream directly from the Spotify app — no phone Bluetooth needed.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-spotify
-```
-
-### With AirPlay
-
-Receive audio from any Apple device or AirPlay-capable app.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-airplay
-```
-
 ### With DLNA renderer
 
 Adds a UPnP/DLNA renderer — stream from any DLNA-capable app or device on the network.
@@ -133,7 +117,7 @@ curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-insta
 ### Everything together
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --all
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-bt --with-eq --with-dlna
 ```
 
 ### Or clone and run locally
@@ -142,14 +126,11 @@ curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-insta
 git clone https://github.com/sijah/Square_PI.git
 cd Square_PI/squarepi-installer
 
-sudo bash install.sh                                             # MPD + myMPD only
-sudo bash install.sh --with-bt                                   # + Bluetooth A2DP
-sudo bash install.sh --with-spotify                              # + Spotify Connect
-sudo bash install.sh --with-airplay                              # + AirPlay
-sudo bash install.sh --with-eq                                   # + Advanced DSP UI
-sudo bash install.sh --with-dlna                                 # + DLNA/UPnP renderer
-sudo bash install.sh --with-bt --with-spotify --with-airplay     # all streaming sources
-sudo bash install.sh --all                                       # everything
+sudo bash install.sh                                  # MPD + myMPD only
+sudo bash install.sh --with-bt                        # + Bluetooth A2DP
+sudo bash install.sh --with-eq                        # + Advanced DSP UI
+sudo bash install.sh --with-dlna                      # + DLNA/UPnP renderer
+sudo bash install.sh --with-bt --with-eq --with-dlna  # everything
 ```
 
 Reboot after the installer finishes:
@@ -223,21 +204,6 @@ http://squarepi.local:8081
 | `bluez` + `bluez-tools` | Bluetooth stack |
 | `bluez-alsa-utils` | BlueALSA, routes Bluetooth audio to ALSA |
 | `squarepi-bt-agent` | Auto-accept pairing, no PIN required |
-| `squarepi-bt-monitor` | Pauses MPD automatically when a BT device connects |
-
-### With `--with-spotify`
-
-| Component | Purpose |
-|---|---|
-| `raspotify` (librespot) | Spotify Connect receiver, streams from Spotify app |
-| `squarepi-spotify-event.sh` | Pauses MPD when Spotify starts; updates source indicator |
-
-### With `--with-airplay`
-
-| Component | Purpose |
-|---|---|
-| `shairport-sync` | AirPlay receiver, streams from Apple devices and apps |
-| `squarepi-airplay-event.sh` | Pauses MPD when AirPlay starts; updates source indicator |
 
 ### With `--with-eq`
 
@@ -265,8 +231,6 @@ After reboot SquarePi is reachable by hostname — no IP address needed.
 | Advanced DSP UI | `http://squarepi.local:8081` *(if `--with-eq`)* |
 | MPD (music apps) | `squarepi.local:6600` |
 | DLNA renderer | Appears as `SquarePi` in DLNA/UPnP apps *(if `--with-dlna`)* |
-| Spotify Connect | Appears as `SquarePi` in Spotify device list *(if `--with-spotify`)* |
-| AirPlay | Appears as `SquarePi` in AirPlay device list *(if `--with-airplay`)* |
 
 MPD advertises itself via Zeroconf (`_mpd._tcp`). Apps like [M.A.L.P](https://f-droid.org/packages/org.gateshipone.malp/), MPDroid, and Cantata auto-discover SquarePi — no manual server entry needed.
 
@@ -349,7 +313,7 @@ Live readout direct from the TAS5805M chip registers:
 - **PVDD** — power rail status (OK / fault)
 - **Faults** — active fault count
 - **Status** — Healthy / Warning / Fault
-- **Sources** — live chips showing which sources are installed and which is active (MPD / BT / Spotify / AirPlay)
+- **Sources** — live chips showing which sources are installed and which is active (MPD / BT / DLNA)
 
 The fault monitor grid shows 13 individual hardware fault flags from the TAS5805M:
 
@@ -399,7 +363,7 @@ After reboot:
 3. Tap pair — no PIN required
 4. Play audio — it routes directly to SquarePi
 
-All sources share the same ALSA output. MPD is paused automatically whenever Bluetooth, Spotify, or AirPlay starts — resume it manually from myMPD when you're done with the other source.
+All sources share the same ALSA output. Pause MPD manually from myMPD before switching to Bluetooth.
 
 **Notes:**
 - Codec: SBC (AAC is not available in the Raspberry Pi OS `bluez-alsa-utils` package)
@@ -443,35 +407,6 @@ sudo systemctl restart bluetooth squarepi-bt-agent
 sudo bluetoothctl pairable on
 sudo bluetoothctl discoverable on
 ```
-
----
-
-## Spotify Connect (`--with-spotify`)
-
-After reboot, SquarePi appears as **`SquarePi`** in the Spotify app device list.
-
-1. Open Spotify on any device on the same Wi-Fi network
-2. Tap the **Devices** icon (bottom bar)
-3. Select **SquarePi**
-4. Play — audio streams directly to SquarePi over the network
-
-MPD is paused automatically when Spotify starts playing. Resume from myMPD when done.
-
-**Note:** Requires a Spotify Premium account. Spotify Connect is a Premium feature.
-
----
-
-## AirPlay (`--with-airplay`)
-
-After reboot, SquarePi appears as **`SquarePi`** in the AirPlay device list on any Apple device or AirPlay-compatible app.
-
-1. Tap the AirPlay / cast icon in your app (Music, Spotify, YouTube, Podcasts, etc.)
-2. Select **SquarePi**
-3. Play — audio streams directly to SquarePi
-
-MPD is paused automatically when an AirPlay session starts. Resume from myMPD when done.
-
-**Works with:** iPhone, iPad, Mac, Apple TV, HomePod, and any third-party app with AirPlay support.
 
 ---
 
@@ -635,8 +570,6 @@ Optional flags add their own steps:
 | Flag | What it installs |
 |---|---|
 | `--with-bt` | Bluetooth A2DP stack, auto-pairing agent, MPD source manager |
-| `--with-spotify` | raspotify (Spotify Connect), MPD pause hook |
-| `--with-airplay` | shairport-sync (AirPlay), MPD pause hook |
 | `--with-eq` | DSP web UI on port 8081, ALSA state restore service |
 | `--with-dlna` | upmpdcli DLNA/UPnP renderer |
 
@@ -656,7 +589,7 @@ All flags can be combined freely.
 | MPD volume control | Software mixer |
 | myMPD port | `8080` |
 | DSP UI port | `8081` |
-| Device name (BT / Spotify / AirPlay) | `SquarePi` |
+| Device name (Bluetooth) | `SquarePi` |
 | Bluetooth codec | SBC |
 | Release metadata | `/etc/squarepi-release` |
 
@@ -665,7 +598,7 @@ All flags can be combined freely.
 | Variable | Purpose |
 |---|---|
 | `SQUAREPI_HOSTNAME` | Sets the Pi hostname |
-| `SQUAREPI_BT_NAME` | Device name for Bluetooth, Spotify Connect, and AirPlay |
+| `SQUAREPI_BT_NAME` | Device name for Bluetooth |
 | `SQUAREPI_BRAND_NAME` | Name shown in banners |
 | `SQUAREPI_TAGLINE` | Tagline in installer banner |
 | `SQUAREPI_PROJECT_URL` | Docs URL in final summary |
@@ -749,28 +682,6 @@ sudo bluetoothctl pairable on
 sudo bluetoothctl discoverable on
 ```
 
-### Spotify Connect not visible in app
-
-```bash
-systemctl status raspotify
-journalctl -u raspotify -n 30
-```
-
-Spotify Connect requires a **Premium** account and the Pi to be on the same network as the Spotify app.
-
-### AirPlay not visible
-
-```bash
-systemctl status shairport-sync
-journalctl -u shairport-sync -n 30
-```
-
-If the device name doesn't appear, restart the service:
-
-```bash
-sudo systemctl restart shairport-sync
-```
-
 ---
 
 ## Uninstall
@@ -786,7 +697,7 @@ cd Square_PI/squarepi-installer
 sudo bash uninstall.sh
 ```
 
-Removes: SquarePi driver, boot overlay, MPD, myMPD, EQ server, Spotify Connect, AirPlay, DLNA renderer, and all SquarePi scripts and services. Prompts before removing MPD music data and before rebooting. Music files are not deleted unless you confirm.
+Removes: SquarePi driver, boot overlay, MPD, myMPD, EQ server, DLNA renderer, and all SquarePi scripts and services. Prompts before removing MPD music data and before rebooting. Music files are not deleted unless you confirm.
 
 ---
 
