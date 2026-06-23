@@ -49,7 +49,7 @@ done
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.1.0"
+INSTALLER_VER="1.2.0"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -653,18 +653,67 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# BT-3. bluealsa-aplay routing — let stock unit handle it (already correct on Bookworm)
+# BT-3. ALSA dmix shared mixer + bluealsa-aplay override
 # -----------------------------------------------------------------------------
-step "[BT] Enabling A2DP → SquarePi routing"
+step "[BT] Creating ALSA shared mixer (dmix) for MPD + Bluetooth"
 
-# The stock bluealsa-aplay.service on Bookworm is correct; just enable it.
-# We do NOT override it — it starts after bluealsa and handles reconnects.
+# MPD holds plughw:LouderRaspberry,0 exclusively; bluealsa-aplay can't open it.
+# dmix lets both share the hardware at a fixed rate via software mixing.
+cat > /etc/asound.conf <<'EOF'
+pcm.squarepi_mix {
+    type plug
+    slave {
+        pcm {
+            type dmix
+            ipc_key 1025
+            ipc_perm 0666
+            slave {
+                pcm "hw:LouderRaspberry,0"
+                rate 44100
+                format S16_LE
+                period_size 4096
+                buffer_size 65536
+            }
+        }
+    }
+}
+
+ctl.squarepi_mix {
+    type hw
+    card LouderRaspberry
+}
+
+pcm.!default {
+    type plug
+    slave.pcm "squarepi_mix"
+}
+
+ctl.!default {
+    type hw
+    card LouderRaspberry
+}
+EOF
+
+# Switch MPD from plughw: to the shared dmix device
+sed -i 's|device\s*"plughw:LouderRaspberry,0"|device          "squarepi_mix"|' /etc/mpd.conf
+systemctl restart mpd
+success "ALSA dmix mixer created; MPD switched to squarepi_mix"
+
+# Override bluealsa-aplay to route to squarepi_mix (fixes "Master elem not found" too)
+mkdir -p /etc/systemd/system/bluealsa-aplay.service.d
+cat > /etc/systemd/system/bluealsa-aplay.service.d/override.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/usr/bin/bluealsa-aplay --pcm=squarepi_mix
+EOF
+
+systemctl daemon-reload
 systemctl enable bluealsa-aplay 2>/dev/null || true
-systemctl restart bluealsa-aplay 2>/dev/null || true
+systemctl restart bluealsa-aplay
 sleep 1
 
 if systemctl is-active --quiet bluealsa-aplay; then
-  success "bluealsa-aplay routing active"
+  success "bluealsa-aplay routing active (→ squarepi_mix)"
 else
   warn "bluealsa-aplay not running yet — it will connect once a BT device pairs"
 fi
@@ -683,21 +732,34 @@ Name = ${BT_DEVICE_NAME}
 Class = 0x200414
 DiscoverableTimeout = 0
 PairableTimeout = 0
-Discoverable = true
-Pairable = true
 EOF
 
+# Install a systemd oneshot that re-applies discoverable/pairable after every
+# bluetooth.service start. Discoverable/Pairable are NOT valid keys in [General]
+# on newer bluez — they silently do nothing, so runtime bluetoothctl is the only
+# reliable mechanism.
+cat > /etc/systemd/system/squarepi-bt-setup.service <<EOF
+[Unit]
+Description=SquarePi Bluetooth adapter setup (discoverable + pairable)
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'bluetoothctl power on; bluetoothctl pairable on; bluetoothctl discoverable on; bluetoothctl system-alias "${BT_DEVICE_NAME}"'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable squarepi-bt-setup
 systemctl restart bluetooth
 sleep 2
+systemctl start squarepi-bt-setup
 
-# Apply runtime adapter state. main.conf handles defaults, but bluetoothctl makes
-# the adapter immediately usable after install and after service restarts.
-bluetoothctl power on 2>/dev/null || true
-bluetoothctl pairable on 2>/dev/null || true
-bluetoothctl discoverable on 2>/dev/null || true
-bluetoothctl system-alias "${BT_DEVICE_NAME}" 2>/dev/null || true
-
-success "Adapter configured as '${BT_DEVICE_NAME}'"
+success "Adapter configured as '${BT_DEVICE_NAME}' (discoverable + pairable persisted via systemd)"
 
 # -----------------------------------------------------------------------------
 # BT-5. Fix rfkill — unblock BT and persist across reboots
@@ -1025,7 +1087,7 @@ echo -e "  ${BOLD}Codec:${NC}           SBC"
 echo -e "  ${BOLD}BT Output:${NC}       ${BRAND_NAME} (${ALSA_SINK})"
 echo ""
 echo -e "  ${CYAN}To connect: Bluetooth Settings → Scan → Tap '${BT_DEVICE_NAME}'${NC}"
-echo -e "  ${YELLOW}Note: Pause MPD before switching to Bluetooth.${NC}"
+echo -e "  ${CYAN}Note: MPD and Bluetooth share the output — both can play simultaneously.${NC}"
 fi
 
 echo ""

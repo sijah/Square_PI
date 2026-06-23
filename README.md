@@ -313,7 +313,6 @@ Live readout direct from the TAS5805M chip registers:
 - **PVDD** — power rail status (OK / fault)
 - **Faults** — active fault count
 - **Status** — Healthy / Warning / Fault
-- **Sources** — live chips showing which sources are installed and which is active (MPD / BT / DLNA)
 
 The fault monitor grid shows 13 individual hardware fault flags from the TAS5805M:
 
@@ -363,11 +362,12 @@ After reboot:
 3. Tap pair — no PIN required
 4. Play audio — it routes directly to SquarePi
 
-All sources share the same ALSA output. Pause MPD manually from myMPD before switching to Bluetooth.
+MPD and Bluetooth share the ALSA output via a software mixer — both can play simultaneously without pausing either.
 
 **Notes:**
 - Codec: SBC (AAC is not available in the Raspberry Pi OS `bluez-alsa-utils` package)
 - Bluetooth adapter is unblocked via `rfkill` on every boot
+- Adapter stays discoverable and pairable after every reboot via `squarepi-bt-setup.service`
 
 ### Troubleshooting Bluetooth
 
@@ -403,9 +403,7 @@ scan on
 Then restart and try again:
 
 ```bash
-sudo systemctl restart bluetooth squarepi-bt-agent
-sudo bluetoothctl pairable on
-sudo bluetoothctl discoverable on
+sudo systemctl restart bluetooth squarepi-bt-agent squarepi-bt-setup
 ```
 
 ---
@@ -677,9 +675,7 @@ curl -fs http://127.0.0.1:8080
 ```bash
 rfkill list
 sudo rfkill unblock bluetooth
-sudo systemctl restart bluetooth squarepi-bt-agent
-sudo bluetoothctl pairable on
-sudo bluetoothctl discoverable on
+sudo systemctl restart bluetooth squarepi-bt-agent squarepi-bt-setup
 ```
 
 ---

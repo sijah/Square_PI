@@ -30,7 +30,7 @@ step()    { echo -e "\n${BOLD}${CYAN}>>> $*${NC}"; }
 # Banner
 # -----------------------------------------------------------------------------
 echo -e "${BOLD}"
-INSTALLER_VER="1.1.0"
+INSTALLER_VER="1.2.0"
 
 echo "  ╔══════════════════════════════════════════════╗"
 echo "  ║         SquarePi Software Uninstaller        ║"
@@ -267,7 +267,44 @@ systemctl daemon-reload
 info "EQ server, init service and preset scripts removed"
 
 # -----------------------------------------------------------------------------
-# 11. Remove DLNA renderer (if installed)
+# 11. Remove Bluetooth stack (if installed)
+# -----------------------------------------------------------------------------
+step "Removing Bluetooth stack (if installed)"
+
+for svc in squarepi-bt-agent squarepi-bt-setup; do
+  if systemctl is-active --quiet "${svc}" 2>/dev/null; then
+    systemctl stop "${svc}"
+  fi
+  if systemctl is-enabled --quiet "${svc}" 2>/dev/null; then
+    systemctl disable "${svc}"
+  fi
+  rm -f "/etc/systemd/system/${svc}.service"
+done
+
+rm -f /usr/local/bin/squarepi-bt-agent.py
+rm -f /etc/systemd/system/bluealsa-aplay.service.d/override.conf
+rmdir /etc/systemd/system/bluealsa-aplay.service.d 2>/dev/null || true
+rm -f /etc/systemd/system/bluealsa.service.d/override.conf
+rmdir /etc/systemd/system/bluealsa.service.d 2>/dev/null || true
+rm -f /etc/asound.conf
+rm -f /etc/bluetooth/main.conf
+
+# Restore MPD device to plughw: now that dmix is gone
+if [[ -f /etc/mpd.conf ]]; then
+  sed -i 's|device\s*"squarepi_mix"|device          "plughw:LouderRaspberry,0"|' /etc/mpd.conf
+fi
+
+if dpkg -l bluez-alsa-utils &>/dev/null 2>&1 || dpkg -l bluealsa &>/dev/null 2>&1; then
+  apt-get remove -y -qq bluez-alsa-utils bluealsa bluez-tools python3-dbus python3-gi 2>/dev/null || true
+  apt-get autoremove -y -qq
+  info "BlueALSA packages removed"
+fi
+
+systemctl daemon-reload
+info "Bluetooth stack removed"
+
+# -----------------------------------------------------------------------------
+# 12. Remove DLNA renderer (if installed)
 # -----------------------------------------------------------------------------
 step "Removing DLNA renderer (if installed)"
 
