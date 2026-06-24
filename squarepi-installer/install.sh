@@ -40,16 +40,24 @@ box_line() { printf "  ║ %-44.44s ║\n" "$*"; }
 INSTALL_BT=0
 INSTALL_EQ=0
 INSTALL_DLNA=0
+INSTALL_SPOTIFY=0
+INSTALL_AIRPLAY=0
 for arg in "$@"; do
-  [[ "$arg" == "--with-bt"   ]] && INSTALL_BT=1
-  [[ "$arg" == "--with-eq"   ]] && INSTALL_EQ=1
-  [[ "$arg" == "--with-dlna" ]] && INSTALL_DLNA=1
+  [[ "$arg" == "--with-bt"      ]] && INSTALL_BT=1
+  [[ "$arg" == "--with-eq"      ]] && INSTALL_EQ=1
+  [[ "$arg" == "--with-dlna"    ]] && INSTALL_DLNA=1
+  [[ "$arg" == "--with-spotify" ]] && INSTALL_SPOTIFY=1
+  [[ "$arg" == "--with-airplay" ]] && INSTALL_AIRPLAY=1
+  if [[ "$arg" == "--all" ]]; then
+    INSTALL_BT=1; INSTALL_EQ=1; INSTALL_DLNA=1
+    INSTALL_SPOTIFY=1; INSTALL_AIRPLAY=1
+  fi
 done
 
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.2.0"
+INSTALLER_VER="1.3.0"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -72,9 +80,11 @@ ALSA_SINK="plughw:LouderRaspberry,0"
 # Banner
 # -----------------------------------------------------------------------------
 INSTALL_LINE="MPD · myMPD"
-[[ $INSTALL_BT   -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · Bluetooth"
-[[ $INSTALL_EQ   -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · EQ UI"
-[[ $INSTALL_DLNA -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · DLNA"
+[[ $INSTALL_BT      -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · Bluetooth"
+[[ $INSTALL_EQ      -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · EQ UI"
+[[ $INSTALL_DLNA    -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · DLNA"
+[[ $INSTALL_SPOTIFY -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · Spotify"
+[[ $INSTALL_AIRPLAY -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · AirPlay"
 
 echo -e "${BOLD}${CYAN}"
 echo "  ╔══════════════════════════════════════════════╗"
@@ -373,8 +383,13 @@ audio_output {
     type            "alsa"
     name            "${BRAND_NAME}"
     device          "plughw:LouderRaspberry,0"
-    format          "44100:16:2"
+    format          "48000:24:2"
     mixer_type      "software"
+}
+
+resampler {
+    plugin          "soxr"
+    quality         "very high"
 }
 
 replaygain          "auto"
@@ -470,18 +485,21 @@ step "Installing EQ preset scripts into myMPD"
 
 MYMPD_SCRIPTS_DIR="/var/lib/mympd/scripts"
 mkdir -p "${MYMPD_SCRIPTS_DIR}"
+# myMPD uses DynamicUser — state dir is owned by nobody:nogroup via private bind mount
+chown nobody:nogroup "${MYMPD_SCRIPTS_DIR}" 2>/dev/null || true
 
 # Helper: writes one preset Lua script
-# Args: filename, band values (space-separated, -15 to 15 where 0=flat)
+# Args: name, order, band values (space-separated, -15 to 15 where 0=flat)
+# myMPD v10+ requires JSON metadata on line 1 for scripts to appear in the UI
 write_eq_preset() {
-  local name="$1"; shift
+  local name="$1"; local order="$2"; shift 2
   local vals=("$@")
   local bands=("00020 Hz" "00032 Hz" "00050 Hz" "00080 Hz" "00125 Hz"
                "00200 Hz" "00315 Hz" "00500 Hz" "00800 Hz" "01250 Hz"
                "02000 Hz" "03150 Hz" "05000 Hz" "08000 Hz" "16000 Hz")
   local file="${MYMPD_SCRIPTS_DIR}/${name}.lua"
   {
-    echo "-- SquarePi EQ preset: ${name}"
+    echo '-- {"order":'"${order}"',"file":"","version":0,"arguments":[]}'
     for i in "${!bands[@]}"; do
       echo "os.execute('amixer -c LouderRaspberry sset \"${bands[$i]}\" ${vals[$i]} 2>/dev/null')"
     done
@@ -491,23 +509,59 @@ write_eq_preset() {
 }
 
 # ALSA range -15 to 15; 0 = flat (0 dB), 1 unit = 1 dB
-write_eq_preset "EQ Flat"        0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
-write_eq_preset "EQ Bass Boost"  7  6  5  4  3  0  0  0  0  0  0  0  0  0  0
-write_eq_preset "EQ Treble"      0  0  0  0  0  0  0  0  0  2  3  4  5  6  6
-write_eq_preset "EQ Vocal"      -3 -3 -2 -1  0  2  3  3  2  1  0 -1 -2 -2 -2
-write_eq_preset "EQ Night Mode" -5 -5 -4 -2  0  0  0 -1 -1 -1 -1 -2 -3 -4 -4
-write_eq_preset "EQ Late Night"  6  5  3  1  0 -1 -1 -1  0  0  1  2  3  4  5
-write_eq_preset "EQ Rock"        5  4  3  2  1 -1 -2 -2 -1  1  2  3  4  5  5
-write_eq_preset "EQ Pop"         2  2  1  0 -1 -1  0  1  2  3  3  2  2  1  1
-write_eq_preset "EQ Jazz"        3  3  2  1  0  1  2  2  1  0 -1 -1 -2 -2 -3
-write_eq_preset "EQ Classical"   0  0  0  0  0  0  0  0  0  0  1  2  3  4  4
-write_eq_preset "EQ Club"        8  7  6  4  2 -1 -2 -2 -1  1  2  3  4  5  6
-write_eq_preset "EQ Hip-Hop"     7  7  6  5  3  1  0  0  1  2  2  2  3  3  2
-write_eq_preset "EQ Acoustic"   -2 -2  0  1  2  2  1  0  1  2  3  3  2  1  0
+write_eq_preset "EQ Flat"        1   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+write_eq_preset "EQ Bass Boost"  2   7  6  5  4  3  0  0  0  0  0  0  0  0  0  0
+write_eq_preset "EQ Treble"      3   0  0  0  0  0  0  0  0  0  2  3  4  5  6  6
+write_eq_preset "EQ Vocal"       4  -3 -3 -2 -1  0  2  3  3  2  1  0 -1 -2 -2 -2
+write_eq_preset "EQ Night Mode"  5  -5 -5 -4 -2  0  0  0 -1 -1 -1 -1 -2 -3 -4 -4
+write_eq_preset "EQ Late Night"  6   6  5  3  1  0 -1 -1 -1  0  0  1  2  3  4  5
+write_eq_preset "EQ Rock"        7   5  4  3  2  1 -1 -2 -2 -1  1  2  3  4  5  5
+write_eq_preset "EQ Pop"         8   2  2  1  0 -1 -1  0  1  2  3  3  2  2  1  1
+write_eq_preset "EQ Jazz"        9   3  3  2  1  0  1  2  2  1  0 -1 -1 -2 -2 -3
+write_eq_preset "EQ Classical"  10   0  0  0  0  0  0  0  0  0  0  1  2  3  4  4
+write_eq_preset "EQ Club"       11   8  7  6  4  2 -1 -2 -2 -1  1  2  3  4  5  6
+write_eq_preset "EQ Hip-Hop"    12   7  7  6  5  3  1  0  0  1  2  2  2  3  3  2
+write_eq_preset "EQ Acoustic"   13  -2 -2  0  1  2  2  1  0  1  2  3  3  2  1  0
+
+# Sleep timer script
+cat > /usr/local/bin/squarepi-sleep-timer.sh <<'STEOF'
+#!/bin/bash
+PIDFILE="/tmp/squarepi-sleep.pid"
+MARKER="/tmp/squarepi-sleep.active"
+case "${1:-}" in
+  start)
+    rm -f "$MARKER"
+    if [[ -f "$PIDFILE" ]]; then kill "$(cat "$PIDFILE")" 2>/dev/null || true; rm -f "$PIDFILE"; fi
+    touch "$MARKER"
+    (sleep "${2:-1800}"; if [[ -f "$MARKER" ]]; then mpc stop 2>/dev/null || true; rm -f "$MARKER" "$PIDFILE"; fi) &
+    echo $! > "$PIDFILE"
+    ;;
+  cancel)
+    rm -f "$MARKER" "$PIDFILE"
+    ;;
+esac
+STEOF
+chmod +x /usr/local/bin/squarepi-sleep-timer.sh
+
+# Sleep timer Lua scripts for myMPD
+order=14
+for entry in "Sleep_30min:1800" "Sleep_60min:3600" "Sleep_90min:5400"; do
+  label="${entry%%:*}"
+  secs="${entry##*:}"
+  { echo '-- {"order":'"${order}"',"file":"","version":0,"arguments":[]}'
+    echo "os.execute('/usr/local/bin/squarepi-sleep-timer.sh start ${secs}')"
+  } > "${MYMPD_SCRIPTS_DIR}/${label}.lua"
+  chmod 644 "${MYMPD_SCRIPTS_DIR}/${label}.lua"
+  (( order++ ))
+done
+{ echo '-- {"order":17,"file":"","version":0,"arguments":[]}'
+  echo "os.execute('/usr/local/bin/squarepi-sleep-timer.sh cancel')"
+} > "${MYMPD_SCRIPTS_DIR}/Sleep_Cancel.lua"
+chmod 644 "${MYMPD_SCRIPTS_DIR}/Sleep_Cancel.lua"
 
 # Restart myMPD so it picks up the new scripts
 systemctl restart mympd 2>/dev/null || true
-success "EQ presets installed — find them in myMPD under Scripts"
+success "EQ presets + sleep timer installed — find them in myMPD under Scripts"
 
 # -----------------------------------------------------------------------------
 # 15. Prepare USB music mount point
@@ -587,6 +641,8 @@ BLUETOOTH_ENABLED=${INSTALL_BT}
 BLUETOOTH_NAME="${BT_DEVICE_NAME}"
 EQ_ENABLED=${INSTALL_EQ}
 DLNA_ENABLED=${INSTALL_DLNA}
+SPOTIFY_ENABLED=${INSTALL_SPOTIFY}
+AIRPLAY_ENABLED=${INSTALL_AIRPLAY}
 EOF
 chmod 644 "${RELEASE_FILE}"
 success "Release metadata written to ${RELEASE_FILE}"
@@ -669,8 +725,8 @@ pcm.squarepi_mix {
             ipc_perm 0666
             slave {
                 pcm "hw:LouderRaspberry,0"
-                rate 44100
-                format S16_LE
+                rate 48000
+                format S32_LE
                 period_size 4096
                 buffer_size 65536
             }
@@ -1044,6 +1100,120 @@ DLNA_HTTP_PORT="8200"
 fi  # end INSTALL_DLNA
 
 # =============================================================================
+# SPOTIFY CONNECT (only if --with-spotify passed)
+# =============================================================================
+if [[ $INSTALL_SPOTIFY -eq 1 ]]; then
+
+step "[Spotify] Adding raspotify repository"
+
+RASPOTIFY_KEY="/usr/share/keyrings/raspotify.gpg"
+curl -fsSL https://dtcooper.github.io/raspotify/key.asc \
+  | gpg --dearmor -o "${RASPOTIFY_KEY}"
+echo "deb [signed-by=${RASPOTIFY_KEY}] https://dtcooper.github.io/raspotify raspotify main" \
+  > /etc/apt/sources.list.d/raspotify.list
+apt-get update -qq
+success "raspotify repository added"
+
+step "[Spotify] Installing raspotify (librespot)"
+apt-get install -y -qq raspotify
+success "raspotify installed"
+
+step "[Spotify] Configuring Spotify Connect"
+
+# Event script: pause MPD when Spotify starts, clean up state on stop
+cat > /usr/local/bin/squarepi-spotify-event.sh <<'SPEOF'
+#!/bin/bash
+case "${PLAYER_EVENT:-}" in
+  start|play|preloading)
+    touch /tmp/squarepi-source-spotify
+    mpc pause 2>/dev/null || true
+    ;;
+  stop|endoftrack)
+    rm -f /tmp/squarepi-source-spotify
+    ;;
+esac
+SPEOF
+chmod 755 /usr/local/bin/squarepi-spotify-event.sh
+
+cat > /etc/raspotify/conf <<EOF
+LIBRESPOT_NAME="${BT_DEVICE_NAME}"
+LIBRESPOT_BITRATE="320"
+LIBRESPOT_FORMAT="S16"
+LIBRESPOT_DEVICE_TYPE="speaker"
+LIBRESPOT_DEVICE="squarepi_mix"
+LIBRESPOT_ONEVENT="/usr/local/bin/squarepi-spotify-event.sh"
+EOF
+
+systemctl daemon-reload
+systemctl enable raspotify
+systemctl restart raspotify
+sleep 2
+
+if systemctl is-active --quiet raspotify; then
+  success "Spotify Connect running — '${BT_DEVICE_NAME}' visible in Spotify app"
+else
+  warn "raspotify not running yet — check: journalctl -u raspotify -n 20"
+fi
+
+fi  # end INSTALL_SPOTIFY
+
+# =============================================================================
+# AIRPLAY (only if --with-airplay passed)
+# =============================================================================
+if [[ $INSTALL_AIRPLAY -eq 1 ]]; then
+
+step "[AirPlay] Installing shairport-sync"
+apt-get install -y -qq shairport-sync
+success "shairport-sync installed"
+
+step "[AirPlay] Configuring AirPlay receiver"
+
+# Event script — runs as shairport-sync user; state files must be in /tmp/
+cat > /usr/local/bin/squarepi-airplay-event.sh <<'APEOF'
+#!/bin/bash
+case "${1:-}" in
+  start)
+    touch /tmp/squarepi-source-airplay
+    mpc pause 2>/dev/null || true
+    ;;
+  stop)
+    rm -f /tmp/squarepi-source-airplay
+    ;;
+esac
+APEOF
+chmod 755 /usr/local/bin/squarepi-airplay-event.sh
+
+cat > /etc/shairport-sync.conf <<APCEOF
+general = {
+  name = "${BT_DEVICE_NAME}";
+  output_backend = "alsa";
+};
+
+alsa = {
+  output_device = "squarepi_mix";
+  mixer_control_name = "Master";
+};
+
+sessioncontrol = {
+  run_this_before_play_begins = "/usr/local/bin/squarepi-airplay-event.sh start";
+  run_this_after_play_ends    = "/usr/local/bin/squarepi-airplay-event.sh stop";
+};
+APCEOF
+
+systemctl daemon-reload
+systemctl enable shairport-sync
+systemctl restart shairport-sync
+sleep 2
+
+if systemctl is-active --quiet shairport-sync; then
+  success "AirPlay running — '${BT_DEVICE_NAME}' visible in AirPlay device list"
+else
+  warn "shairport-sync not running yet — check: journalctl -u shairport-sync -n 20"
+fi
+
+fi  # end INSTALL_AIRPLAY
+
+# =============================================================================
 # Final summary
 # =============================================================================
 trap - EXIT
@@ -1084,11 +1254,21 @@ echo ""
 echo -e "  ${BOLD}Bluetooth name:${NC}  ${BT_DEVICE_NAME}"
 echo -e "  ${BOLD}Pairing:${NC}         Auto-accept (no PIN needed)"
 echo -e "  ${BOLD}Codec:${NC}           SBC"
-echo -e "  ${BOLD}BT Output:${NC}       ${BRAND_NAME} (${ALSA_SINK})"
-echo ""
 echo -e "  ${CYAN}To connect: Bluetooth Settings → Scan → Tap '${BT_DEVICE_NAME}'${NC}"
-echo -e "  ${CYAN}Note: MPD and Bluetooth share the output — both can play simultaneously.${NC}"
 fi
+
+if [[ $INSTALL_SPOTIFY -eq 1 ]]; then
+echo ""
+echo -e "  ${BOLD}Spotify Connect:${NC} Open Spotify → Devices → '${BT_DEVICE_NAME}'"
+fi
+
+if [[ $INSTALL_AIRPLAY -eq 1 ]]; then
+echo ""
+echo -e "  ${BOLD}AirPlay:${NC}         Select '${BT_DEVICE_NAME}' in AirPlay device list"
+fi
+
+echo ""
+echo -e "  ${CYAN}Sleep timer: open myMPD → Scripts → Sleep_30min / 60min / 90min${NC}"
 
 echo ""
 echo -e "  ${YELLOW}⚠  A reboot is required to load the SquarePi audio driver.${NC}"

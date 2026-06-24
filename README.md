@@ -2,7 +2,7 @@
 
 SquarePi is an open-source Raspberry Pi audio streamer with a built-in 2×30W DSP amplifier. One installer turns any Pi into a headless network player — no config files, no IP addresses to remember.
 
-**Stream from:** Bluetooth · DLNA · MPD  
+**Stream from:** Bluetooth · Spotify Connect · AirPlay · DLNA · MPD  
 **Control with:** 15-band EQ web interface · EQ presets · Sleep timer · Real-time fault monitor
 
 *From square wave to every corner.* — Sijah AK
@@ -114,10 +114,26 @@ Adds a UPnP/DLNA renderer — stream from any DLNA-capable app or device on the 
 curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-dlna
 ```
 
+### With Spotify Connect
+
+Adds Spotify Connect — SquarePi appears as a speaker in the Spotify app (requires Spotify Premium).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-spotify
+```
+
+### With AirPlay
+
+Adds AirPlay receiver — stream from any Apple device or AirPlay-compatible app.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-airplay
+```
+
 ### Everything together
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-bt --with-eq --with-dlna
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --all --with-eq
 ```
 
 ### Or clone and run locally
@@ -126,11 +142,13 @@ curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-insta
 git clone https://github.com/sijah/Square_PI.git
 cd Square_PI/squarepi-installer
 
-sudo bash install.sh                                  # MPD + myMPD only
-sudo bash install.sh --with-bt                        # + Bluetooth A2DP
-sudo bash install.sh --with-eq                        # + Advanced DSP UI
-sudo bash install.sh --with-dlna                      # + DLNA/UPnP renderer
-sudo bash install.sh --with-bt --with-eq --with-dlna  # everything
+sudo bash install.sh                    # MPD + myMPD only
+sudo bash install.sh --with-bt          # + Bluetooth A2DP
+sudo bash install.sh --with-eq          # + Advanced DSP UI
+sudo bash install.sh --with-dlna        # + DLNA/UPnP renderer
+sudo bash install.sh --with-spotify     # + Spotify Connect
+sudo bash install.sh --with-airplay     # + AirPlay
+sudo bash install.sh --all --with-eq    # everything
 ```
 
 Reboot after the installer finishes:
@@ -413,6 +431,50 @@ sudo systemctl restart bluetooth squarepi-bt-agent squarepi-bt-setup
 After reboot, SquarePi appears as a **DLNA / UPnP renderer** named `SquarePi` in any compatible app — BubbleUPnP, Kodi, VLC, Windows Media Player, and most smart TV remotes.
 
 Select SquarePi as the playback device in your app and start streaming.
+
+---
+
+## Spotify Connect (`--with-spotify`)
+
+After reboot, SquarePi appears as a speaker in the **Spotify app** under Devices.
+
+1. Open Spotify on your phone, tablet, or desktop
+2. Tap the **Devices** icon → select **SquarePi**
+3. Playback routes to SquarePi immediately
+
+**Notes:**
+- Requires Spotify Premium
+- Automatically pauses MPD when Spotify starts playing
+- Bitrate: 320 kbps
+
+### Troubleshooting Spotify Connect
+
+```bash
+systemctl status raspotify
+journalctl -u raspotify -n 30
+```
+
+---
+
+## AirPlay (`--with-airplay`)
+
+After reboot, SquarePi appears as an **AirPlay** speaker on your local network.
+
+1. On iPhone, iPad, or Mac — swipe for Control Centre
+2. Tap **AirPlay** → select **SquarePi**
+3. Audio streams directly to SquarePi
+
+**Notes:**
+- Works with any AirPlay-compatible app (Apple Music, Spotify, VLC, etc.)
+- Automatically pauses MPD when AirPlay session starts
+- No Apple account or subscription required
+
+### Troubleshooting AirPlay
+
+```bash
+systemctl status shairport-sync
+journalctl -u shairport-sync -n 30
+```
 
 ---
 

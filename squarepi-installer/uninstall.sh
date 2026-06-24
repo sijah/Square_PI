@@ -30,7 +30,7 @@ step()    { echo -e "\n${BOLD}${CYAN}>>> $*${NC}"; }
 # Banner
 # -----------------------------------------------------------------------------
 echo -e "${BOLD}"
-INSTALLER_VER="1.2.0"
+INSTALLER_VER="1.3.0"
 
 echo "  ╔══════════════════════════════════════════════╗"
 echo "  ║         SquarePi Software Uninstaller        ║"
@@ -326,7 +326,62 @@ systemctl daemon-reload
 info "DLNA renderer removed"
 
 # -----------------------------------------------------------------------------
-# 12. Remove SquarePi release metadata
+# 13. Remove Spotify Connect (if installed)
+# -----------------------------------------------------------------------------
+step "Removing Spotify Connect (if installed)"
+
+if systemctl is-active --quiet raspotify 2>/dev/null; then
+  systemctl stop raspotify
+fi
+if systemctl is-enabled --quiet raspotify 2>/dev/null; then
+  systemctl disable raspotify
+fi
+if dpkg -l raspotify &>/dev/null 2>&1; then
+  apt-get remove -y -qq raspotify
+  apt-get autoremove -y -qq
+  info "raspotify removed"
+fi
+rm -f /etc/apt/sources.list.d/raspotify.list
+rm -f /usr/share/keyrings/raspotify.gpg
+rm -f /etc/raspotify/conf
+rm -f /usr/local/bin/squarepi-spotify-event.sh
+rm -f /tmp/squarepi-source-spotify
+systemctl daemon-reload
+info "Spotify Connect removed"
+
+# -----------------------------------------------------------------------------
+# 14. Remove AirPlay (if installed)
+# -----------------------------------------------------------------------------
+step "Removing AirPlay (if installed)"
+
+if systemctl is-active --quiet shairport-sync 2>/dev/null; then
+  systemctl stop shairport-sync
+fi
+if systemctl is-enabled --quiet shairport-sync 2>/dev/null; then
+  systemctl disable shairport-sync
+fi
+if dpkg -l shairport-sync &>/dev/null 2>&1; then
+  apt-get remove -y -qq shairport-sync
+  apt-get autoremove -y -qq
+  info "shairport-sync removed"
+fi
+rm -f /etc/shairport-sync.conf
+rm -f /usr/local/bin/squarepi-airplay-event.sh
+rm -f /tmp/squarepi-source-airplay
+systemctl daemon-reload
+info "AirPlay removed"
+
+# -----------------------------------------------------------------------------
+# 15. Remove sleep timer
+# -----------------------------------------------------------------------------
+step "Removing sleep timer"
+rm -f /usr/local/bin/squarepi-sleep-timer.sh
+rm -f /tmp/squarepi-sleep.pid /tmp/squarepi-sleep.active
+rm -f /var/lib/mympd/scripts/Sleep_*.lua
+info "Sleep timer removed"
+
+# -----------------------------------------------------------------------------
+# 16. Remove SquarePi release metadata
 # -----------------------------------------------------------------------------
 step "Removing SquarePi release metadata"
 if [[ -f /etc/squarepi-release ]]; then
