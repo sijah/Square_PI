@@ -29,7 +29,9 @@ A compact Class-D amplifier HAT for Raspberry Pi, built around the Texas Instrum
 
 ### Raspberry Pi compatibility
 
-Raspberry Pi 5 · 4B · 3B+ · 3B · Zero 2 W · Zero W
+4B · 3B+ · 3B · Zero 2 W · Zero W
+
+> **Pi 5 not supported** — the RP1 southbridge uses a different I2S implementation. Pi 5 support is planned.
 
 ### Power wiring
 
