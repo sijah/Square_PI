@@ -152,6 +152,9 @@ if ! grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null; then
 else
   PI_MODEL=$(cat /proc/device-tree/model | tr -d '\0')
   success "Hardware: ${PI_MODEL}"
+  if echo "${PI_MODEL}" | grep -q "Raspberry Pi 5"; then
+    error "Pi 5 detected. The TAS5805M overlay requires I²S via the RP1 southbridge, which uses different device tree overlays — Pi 5 is not yet supported."
+  fi
 fi
 
 # -----------------------------------------------------------------------------
