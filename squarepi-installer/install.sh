@@ -470,18 +470,21 @@ step "Installing EQ preset scripts into myMPD"
 
 MYMPD_SCRIPTS_DIR="/var/lib/mympd/scripts"
 mkdir -p "${MYMPD_SCRIPTS_DIR}"
+# myMPD uses DynamicUser — state dir is owned by nobody:nogroup via private bind mount
+chown nobody:nogroup "${MYMPD_SCRIPTS_DIR}" 2>/dev/null || true
 
 # Helper: writes one preset Lua script
-# Args: filename, band values (space-separated, -15 to 15 where 0=flat)
+# Args: name, order, band values (space-separated, -15 to 15 where 0=flat)
+# myMPD v10+ requires JSON metadata on line 1 for scripts to appear in the UI
 write_eq_preset() {
-  local name="$1"; shift
+  local name="$1"; local order="$2"; shift 2
   local vals=("$@")
   local bands=("00020 Hz" "00032 Hz" "00050 Hz" "00080 Hz" "00125 Hz"
                "00200 Hz" "00315 Hz" "00500 Hz" "00800 Hz" "01250 Hz"
                "02000 Hz" "03150 Hz" "05000 Hz" "08000 Hz" "16000 Hz")
   local file="${MYMPD_SCRIPTS_DIR}/${name}.lua"
   {
-    echo "-- SquarePi EQ preset: ${name}"
+    echo '-- {"order":'"${order}"',"file":"","version":0,"arguments":[]}'
     for i in "${!bands[@]}"; do
       echo "os.execute('amixer -c LouderRaspberry sset \"${bands[$i]}\" ${vals[$i]} 2>/dev/null')"
     done
@@ -491,19 +494,19 @@ write_eq_preset() {
 }
 
 # ALSA range -15 to 15; 0 = flat (0 dB), 1 unit = 1 dB
-write_eq_preset "EQ Flat"        0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
-write_eq_preset "EQ Bass Boost"  7  6  5  4  3  0  0  0  0  0  0  0  0  0  0
-write_eq_preset "EQ Treble"      0  0  0  0  0  0  0  0  0  2  3  4  5  6  6
-write_eq_preset "EQ Vocal"      -3 -3 -2 -1  0  2  3  3  2  1  0 -1 -2 -2 -2
-write_eq_preset "EQ Night Mode" -5 -5 -4 -2  0  0  0 -1 -1 -1 -1 -2 -3 -4 -4
-write_eq_preset "EQ Late Night"  6  5  3  1  0 -1 -1 -1  0  0  1  2  3  4  5
-write_eq_preset "EQ Rock"        5  4  3  2  1 -1 -2 -2 -1  1  2  3  4  5  5
-write_eq_preset "EQ Pop"         2  2  1  0 -1 -1  0  1  2  3  3  2  2  1  1
-write_eq_preset "EQ Jazz"        3  3  2  1  0  1  2  2  1  0 -1 -1 -2 -2 -3
-write_eq_preset "EQ Classical"   0  0  0  0  0  0  0  0  0  0  1  2  3  4  4
-write_eq_preset "EQ Club"        8  7  6  4  2 -1 -2 -2 -1  1  2  3  4  5  6
-write_eq_preset "EQ Hip-Hop"     7  7  6  5  3  1  0  0  1  2  2  2  3  3  2
-write_eq_preset "EQ Acoustic"   -2 -2  0  1  2  2  1  0  1  2  3  3  2  1  0
+write_eq_preset "EQ Flat"        1   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+write_eq_preset "EQ Bass Boost"  2   7  6  5  4  3  0  0  0  0  0  0  0  0  0  0
+write_eq_preset "EQ Treble"      3   0  0  0  0  0  0  0  0  0  2  3  4  5  6  6
+write_eq_preset "EQ Vocal"       4  -3 -3 -2 -1  0  2  3  3  2  1  0 -1 -2 -2 -2
+write_eq_preset "EQ Night Mode"  5  -5 -5 -4 -2  0  0  0 -1 -1 -1 -1 -2 -3 -4 -4
+write_eq_preset "EQ Late Night"  6   6  5  3  1  0 -1 -1 -1  0  0  1  2  3  4  5
+write_eq_preset "EQ Rock"        7   5  4  3  2  1 -1 -2 -2 -1  1  2  3  4  5  5
+write_eq_preset "EQ Pop"         8   2  2  1  0 -1 -1  0  1  2  3  3  2  2  1  1
+write_eq_preset "EQ Jazz"        9   3  3  2  1  0  1  2  2  1  0 -1 -1 -2 -2 -3
+write_eq_preset "EQ Classical"  10   0  0  0  0  0  0  0  0  0  0  1  2  3  4  4
+write_eq_preset "EQ Club"       11   8  7  6  4  2 -1 -2 -2 -1  1  2  3  4  5  6
+write_eq_preset "EQ Hip-Hop"    12   7  7  6  5  3  1  0  0  1  2  2  2  3  3  2
+write_eq_preset "EQ Acoustic"   13  -2 -2  0  1  2  2  1  0  1  2  3  3  2  1  0
 
 # Restart myMPD so it picks up the new scripts
 systemctl restart mympd 2>/dev/null || true
