@@ -59,7 +59,9 @@ RELEASE_FILE="/etc/squarepi-release"
 HOSTNAME_REQUESTED="${SQUAREPI_HOSTNAME:-}"
 
 TAS_I2C_ADDR=""               # Auto-detected (0x2c/0x2d/0x2e/0x2f); override if needed
-TAS_DRIVER_REPO="https://github.com/sonocotta/tas5805m-driver-for-raspbian"
+TAS_DRIVER_REPO="https://github.com/sijah/tas5805m-driver-for-raspbian"
+TAS_DRIVER_BRANCH="main"      # dev/pi5-support for Pi 5
+TAS_OVERLAY_NAME="tas58xx"    # tas58xx-pi5 for Pi 5
 MPD_MUSIC_DIR="/var/lib/mpd/music"
 USB_MUSIC_DIR="/mnt/usb-music"
 MYMPD_HTTP_PORT="8080"
@@ -153,7 +155,9 @@ else
   PI_MODEL=$(cat /proc/device-tree/model | tr -d '\0')
   success "Hardware: ${PI_MODEL}"
   if echo "${PI_MODEL}" | grep -q "Raspberry Pi 5"; then
-    error "Pi 5 detected. The TAS5805M overlay requires I²S via the RP1 southbridge, which uses different device tree overlays — Pi 5 is not yet supported."
+    info "Pi 5 detected — using RP1 I2S overlay (tas58xx-pi5)"
+    TAS_DRIVER_BRANCH="dev/pi5-support"
+    TAS_OVERLAY_NAME="tas58xx-pi5"
   fi
 fi
 
@@ -259,7 +263,7 @@ step "Building TAS5805M kernel driver from source"
 
 TMP_DIR=$(mktemp -d)
 info "Cloning driver into ${TMP_DIR}"
-git clone --depth=1 "${TAS_DRIVER_REPO}" "${TMP_DIR}/tas5805m" 2>&1 | \
+git clone --depth=1 --branch "${TAS_DRIVER_BRANCH}" "${TAS_DRIVER_REPO}" "${TMP_DIR}/tas5805m" 2>&1 | \
   grep -E "(Cloning|done)" || true
 
 cd "${TMP_DIR}/tas5805m"
@@ -280,10 +284,10 @@ step "Configuring boot overlay"
 
 OVERLAY_DIR=""
 for _d in /boot/firmware/overlays /boot/overlays; do
-  [[ -f "${_d}/tas58xx.dtbo" ]] && { OVERLAY_DIR="${_d}"; break; }
+  [[ -f "${_d}/${TAS_OVERLAY_NAME}.dtbo" ]] && { OVERLAY_DIR="${_d}"; break; }
 done
 if [[ -z "${OVERLAY_DIR}" ]]; then
-  error "tas58xx.dtbo not found in /boot/firmware/overlays or /boot/overlays; refusing to edit boot config"
+  error "${TAS_OVERLAY_NAME}.dtbo not found in /boot/firmware/overlays or /boot/overlays; refusing to edit boot config"
 fi
 
 # Detect boot config location (Bookworm uses /boot/firmware/)
@@ -333,16 +337,16 @@ fi
 
 # Add SquarePi audio overlay
 if grep -q "dtoverlay=tas58xx" "${CONFIG_FILE}"; then
-  sed -i "s|dtoverlay=tas58xx.*|dtoverlay=tas58xx,i2creg=${TAS_I2C_ADDR}|" "${CONFIG_FILE}"
-  info "Updated existing SquarePi audio overlay (addr=${TAS_I2C_ADDR})"
+  sed -i "s|dtoverlay=tas58xx.*|dtoverlay=${TAS_OVERLAY_NAME},i2creg=${TAS_I2C_ADDR}|" "${CONFIG_FILE}"
+  info "Updated existing SquarePi audio overlay (${TAS_OVERLAY_NAME}, addr=${TAS_I2C_ADDR})"
 else
   cat >> "${CONFIG_FILE}" <<EOF
 
 # SquarePi HAT
 # pdn_gpio omitted — PDN pulled HIGH via 10K resistor to 3V3 on SquarePi V1
-dtoverlay=tas58xx,i2creg=${TAS_I2C_ADDR}
+dtoverlay=${TAS_OVERLAY_NAME},i2creg=${TAS_I2C_ADDR}
 EOF
-  success "SquarePi audio overlay added to ${CONFIG_FILE}"
+  success "SquarePi audio overlay added to ${CONFIG_FILE} (${TAS_OVERLAY_NAME})"
 fi
 
 # -----------------------------------------------------------------------------
