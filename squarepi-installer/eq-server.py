@@ -129,7 +129,7 @@ def amixer_get(control):
 def amixer_set(control, value):
     """Write ALSA integer for a control."""
     subprocess.run(
-        ["amixer", "-c", CARD, "sset", control, str(value)],
+        ["amixer", "-c", CARD, "sset", control, "--", str(value)],
         stderr=subprocess.DEVNULL
     )
 

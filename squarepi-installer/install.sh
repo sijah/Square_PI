@@ -57,7 +57,7 @@ done
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.3.1"
+INSTALLER_VER="1.3.2"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -509,7 +509,7 @@ write_eq_preset() {
   {
     echo '-- {"order":'"${order}"',"file":"","version":0,"arguments":[]}'
     for i in "${!bands[@]}"; do
-      echo "os.execute('amixer -c LouderRaspberry sset \"${bands[$i]}\" ${vals[$i]} 2>/dev/null')"
+      echo "os.execute('amixer -c LouderRaspberry sset \"${bands[$i]}\" -- ${vals[$i]} 2>/dev/null')"
     done
     echo "os.execute('alsactl store 2>/dev/null')"
   } > "${file}"
