@@ -8,7 +8,7 @@
 
 **A Raspberry Pi HAT that turns any Pi into a 2×30W hi-fi wireless speaker system.**
 
-Powered by the **SquarePi Audio Engine™** — featuring SquarePi Upscaler™, SquarePi Resampler™, SquarePi Mixer™, and SquarePi EQ™ — all running automatically from a single install command.
+One install command sets up the audio driver, music player, web UI, Bluetooth, DLNA, Spotify Connect, AirPlay, and a 15-band hardware DSP equalizer. After a reboot it's reachable at `squarepi.local` from any phone or browser — no app, no account, no cloud.
 
 > *From square wave to every corner.* — Sijah AK
 
@@ -21,7 +21,7 @@ Powered by the **SquarePi Audio Engine™** — featuring SquarePi Upscaler™, 
 | | |
 |---|---|
 | Output | **2×30W** stereo Class-D |
-| Audio quality | **48kHz / 24-bit** — SquarePi Upscaler™ automatic |
+| Audio quality | **48kHz / 24-bit** — automatic upscaling on all sources |
 | Cost | **Under $30** in parts |
 | Protocols | **7** — BT · DLNA · Spotify · AirPlay · USB · Radio · MPD |
 | Setup | **One command** — `sudo bash install.sh --all` |
@@ -31,8 +31,6 @@ Powered by the **SquarePi Audio Engine™** — featuring SquarePi Upscaler™, 
 ---
 
 ## What it plays from
-
-All sources pass through the **SquarePi Audio Engine™** automatically.
 
 | Protocol | How it works |
 |---|---|
@@ -44,25 +42,25 @@ All sources pass through the **SquarePi Audio Engine™** automatically.
 | **Internet Radio** | Built-in streaming, hundreds of stations, no extra app |
 | **MPD clients** | Any MPD-compatible app on any OS auto-discovers SquarePi |
 
-All seven sources can be active simultaneously. **SquarePi Mixer™** handles multi-source sharing at the ALSA layer with no quality loss.
+All sources can be active simultaneously — ALSA dmix mixes them at the hardware layer.
 
 ---
 
 ## SquarePi Audio Engine™
 
-Every source — Bluetooth SBC from a phone, MP3 from a USB stick, 44.1kHz FLAC from DLNA — passes through four automatic processing stages before it reaches your speakers.
+Every source — Bluetooth from a phone, MP3 from a USB stick, 44.1kHz FLAC from DLNA — passes through four automatic stages before it reaches the speakers.
 
 ### 1 — SquarePi Upscaler™
-All incoming audio is automatically upscaled to **48kHz / 24-bit**. No settings. No configuration. The Pi hardware clock runs 10× more accurately at 48kHz than at 44.1kHz, so this is both the correct native rate and the optimal quality operating point.
+All audio is upscaled to **48kHz / 24-bit**. The Pi's hardware clock is ~10× more accurate at 48kHz than 44.1kHz, making this the correct native operating rate.
 
 ### 2 — SquarePi Resampler™
-Sample rate conversion is handled by **SoXR** — the same polyphase resampling library used in professional audio tools. A 44.1kHz CD track converts to 48kHz via a mathematically transparent 160:147 ratio with "very high" quality filter. The conversion is audibly indistinguishable from a native 48kHz source.
+Rate conversion uses **SoXR** — a polyphase resampling library used in professional audio tools. 44.1kHz converts to 48kHz via a 160:147 integer ratio at "very high" quality. [Technical details →](docs/audio-engine.md)
 
 ### 3 — SquarePi Mixer™
-Multiple sources — Bluetooth and DLNA simultaneously, for example — share the audio output through an ALSA software dmix layer running at 48kHz / S32_LE. Up to 10 devices can connect and control playback at the same time. No source pauses another. No clicks or dropouts between streams.
+Multiple sources share the output via ALSA dmix at 48kHz / S32_LE. Bluetooth and DLNA playing at the same time works without either pausing.
 
 ### 4 — SquarePi EQ™
-15-band hardware DSP equalizer running directly inside the TAS5805M amplifier chip over I²C. Zero CPU load. Zero latency. The EQ runs entirely in the amplifier — the Pi does no audio processing for equalization. [Full technical details →](docs/audio-engine.md)
+15-band parametric EQ running inside the TAS5805M chip over I²C — no CPU involvement, no latency. [Technical details →](docs/audio-engine.md)
 
 ---
 
@@ -86,7 +84,7 @@ Multiple sources — Bluetooth and DLNA simultaneously, for example — share th
 | EQ Hip-Hop | Deep sub-bass, forward mids |
 | EQ Acoustic | Natural room character |
 
-All 13 presets installed for everyone — no extra flag needed. Find them in myMPD under **Scripts**.
+All 13 presets are installed by default. Find them in myMPD under **Scripts**.
 
 ### 15 EQ Bands
 
@@ -98,7 +96,7 @@ All 13 presets installed for everyone — no extra flag needed. Find them in myM
 | 4 | 80 Hz | 9 | 800 Hz | 14 | 8 kHz |
 | 5 | 125 Hz | 10 | 1.25 kHz | 15 | 16 kHz |
 
-Range: ±15 dB per band. Hardware DSP — the Pi CPU is not involved.
+Range: ±15 dB per band. Runs in the TAS5805M chip — the Pi CPU is not involved.
 
 ### Visual DSP Interface (`--with-eq`)
 
@@ -106,13 +104,13 @@ Open `http://squarepi.local:8081` for the full real-time DSP control panel.
 
 ![SquarePi DSP Control Interface](docs/images/EQ_UI.png)
 
-- **15 fader sliders** — real-time DSP update on every move
-- **Live frequency response graph** — smooth curve with dB grid, amber = boost, blue = cut
-- **Custom preset** — dial in your own curve and save it
+- **15 fader sliders** — DSP updates on every move
+- **Frequency response graph** — live curve, amber = boost, blue = cut
+- **Custom preset** — save your own curve
 - **Analog Gain** — hardware output trim (0 to −15.5 dB)
-- **Balance** — continuous L/R pan
+- **Balance** — L/R pan
 - **Mixer Mode** — Stereo / Mono / Left Only / Right Only / Custom matrix
-- **Save to chip** — settings survive full power cycles via `alsactl store`
+- **Save to chip** — settings survive power cycles (`alsactl store`)
 
 Terminal access via `alsamixer` → `F6` → `LouderRaspberry`.
 
@@ -142,11 +140,11 @@ Green = clear. Red = active. All faults self-clear when the condition resolves.
 | Interface | Address | Notes |
 |---|---|---|
 | myMPD web UI | `http://squarepi.local:8080` | Mobile-optimised, always installed |
-| SquarePi EQ™ | `http://squarepi.local:8081` | With `--with-eq` |
+| EQ DSP UI | `http://squarepi.local:8081` | With `--with-eq` |
 | MPD (music apps) | `squarepi.local:6600` | Auto-discovered by M.A.L.P, MPDroid, Cantata |
 | DLNA renderer | Appears as `SquarePi` in DLNA apps | With `--with-dlna` |
 
-No IP address needed. Everything reachable by name on any network.
+No IP address needed — everything is reachable by hostname.
 
 ### Sleep Timer
 
@@ -232,7 +230,7 @@ aplay -l    # should show LouderRaspberry
 
 Open myMPD: `http://squarepi.local:8080`
 
-> **First boot defaults:** Volume at 25%. SquarePi EQ™ initialised to flat (all bands 0 dB).
+> **First boot defaults:** Volume at 25%. EQ initialised to flat (all bands 0 dB).
 
 [Full setup guide with OS flashing, first boot, and troubleshooting →](docs/setup.md)
 
@@ -243,15 +241,14 @@ Open myMPD: `http://squarepi.local:8080`
 | | **SquarePi** | Sonos Era 100 | Amazon Echo Studio |
 |---|---|---|---|
 | Price | **< $30 parts** | $249 | $199 |
-| Cloud required | **Never** | Always | Always |
-| Account required | **None** | Yes | Yes |
+| Cloud | **None** | Required | Required |
+| Account | **None** | Sonos account | Amazon account |
 | Data collection | **None** | Yes | Yes |
 | Subscription | **None** | Some features | Some features |
-| Protocols | **BT · DLNA · Spotify · AirPlay · USB · Radio** | Limited | Limited |
-| EQ | **SquarePi EQ™ 15-band hardware DSP** | App-only, limited | App-only, limited |
-| Upscaling | **SquarePi Upscaler™ 48kHz/24-bit** | None | None |
-| Open source | **Fully** | No | No |
-| Hackable | **Fork it, own it** | No | No |
+| Protocols | **BT · DLNA · Spotify · AirPlay · USB · Radio** | BT · AirPlay · Spotify | BT · AirPlay |
+| EQ | **15-band hardware DSP** | App-based, 5 presets | App-based, 3 presets |
+| Audio upscaling | **48kHz / 24-bit** | None | None |
+| Open source | **Yes (MIT)** | No | No |
 | Setup | **One command** | App + account | App + account |
 
 ---
@@ -259,10 +256,10 @@ Open myMPD: `http://squarepi.local:8080`
 ## Who It's For
 
 - **Makers and hobbyists** — open hardware, open software, real specs
-- **Non-technical families** — one command install, zero cloud, works on any phone
-- **DIY audio community** — KiCad files, full BOM, JLCPCB-ready Gerbers in Releases
-- **Privacy-conscious users** — no cloud, no account, no data collection, ever
-- **Anyone tired of subscriptions** — music you control, on hardware you own
+- **Non-technical families** — one command, works from any phone browser
+- **DIY audio community** — KiCad files, full BOM, Gerbers in Releases
+- **Privacy-conscious users** — fully local, no account, no telemetry
+- **Anyone tired of subscriptions** — music you control on hardware you own
 
 ---
 
@@ -372,7 +369,7 @@ Hardware designed in **KiCad**. PCB fabricated at **JLCPCB**.
 | `bluez-alsa-utils` | BlueALSA, routes BT audio to ALSA |
 | `squarepi-bt-agent` | Auto-accept pairing, no PIN |
 | `squarepi-bt-setup.service` | Keeps adapter discoverable and pairable after every reboot |
-| `/etc/asound.conf` dmix | SquarePi Mixer™ — shared output for BT + MPD simultaneously |
+| `/etc/asound.conf` dmix | Shared ALSA output — BT and MPD play simultaneously |
 
 </details>
 
@@ -565,7 +562,7 @@ Removes all SquarePi components. Prompts before deleting music data. Music files
 
 | Document | Contents |
 |---|---|
-| [docs/audio-engine.md](docs/audio-engine.md) | Deep dive: Upscaler™, Resampler™, Mixer™, EQ™ |
+| [docs/audio-engine.md](docs/audio-engine.md) | How the audio pipeline works — upscaling, resampling, mixing, DSP EQ |
 | [docs/supported-protocols.md](docs/supported-protocols.md) | Setup and usage for all 7 protocols |
 | [docs/setup.md](docs/setup.md) | Full guide: OS flash → HAT → install → first boot → troubleshoot |
 | [ABOUT.md](ABOUT.md) | Full project pitch for press and feature requests |
