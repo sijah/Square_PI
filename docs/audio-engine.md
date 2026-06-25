@@ -1,8 +1,8 @@
 # SquarePi Audio Engine™ — Technical Deep Dive
 
-The SquarePi Audio Engine™ is a four-stage automatic audio processing pipeline that runs on every SquarePi system. Every audio source — regardless of protocol, sample rate, or bit depth — passes through all four stages before reaching the speakers.
+Every audio source — regardless of protocol, sample rate, or bit depth — passes through four processing stages before reaching the speakers. All four run automatically with no configuration.
 
-The stages run in this order:
+The stages in order:
 
 ```
 Source audio
@@ -23,7 +23,6 @@ SquarePi EQ™        ─── TAS5805M hardware DSP over I²C
 Speakers
 ```
 
-No configuration required. All four stages are active automatically from first boot.
 
 ---
 
@@ -42,9 +41,7 @@ The Raspberry Pi generates its audio master clock from the on-chip PLL (PLLD, 50
 | 44.1 kHz | ~1.8 ppm |
 | 48 kHz | ~0.16 ppm |
 
-The Pi clock is approximately **10× more accurate** at 48kHz than at 44.1kHz. Operating at 44.1kHz introduces a small but measurable frequency error that accumulates over time. 48kHz is the Pi's native audio operating point.
-
-This is why SquarePi runs its entire pipeline at 48kHz regardless of source material.
+The Pi clock is approximately **10× more accurate** at 48kHz than at 44.1kHz — the 44.1kHz clock has a constant ~1.8 ppm offset baked into the fractional divider. 48kHz is the Pi's native audio operating point, so that's what the whole pipeline runs at.
 
 ### Why 24-bit?
 
@@ -88,7 +85,7 @@ The ratio 44100:48000 simplifies to **147:160**. SoXR implements this as a polyp
 2. Apply anti-aliasing low-pass filter
 3. Downsample by 147 (keep every 147th sample)
 
-The filter is applied once, not in two separate passes. The "very high" quality setting uses a longer filter kernel with tighter stopband attenuation, producing a conversion that is audibly transparent.
+The filter runs in a single pass. The "very high" quality setting uses a longer filter kernel with tighter stopband attenuation.
 
 ### MPD configuration
 
@@ -106,10 +103,10 @@ resampler {
 | `quick` | Real-time with minimal CPU |
 | `medium` | General purpose |
 | `high` | High quality |
-| `very high` | SquarePi default — studio-grade |
+| `very high` | SquarePi default |
 | `ultra high` | Mastering (high CPU, not practical on Zero 2W) |
 
-`very high` is the practical maximum for the Pi Zero 2W — it runs without audible dropouts at 44100→48000 on a single-core Arm Cortex-A53.
+`very high` is the practical maximum for the Pi Zero 2W — it runs without audible dropouts at 44100→48000 on the Zero 2W's quad-core Cortex-A53.
 
 ---
 
@@ -121,7 +118,7 @@ Shares a single audio output device among multiple simultaneous sources using AL
 
 ### Why it's needed
 
-Hardware audio devices are exclusive-access by default. Without a mixer, only one application can use the audio output at a time. The SquarePi Mixer™ solves this by creating a virtual shared device that multiple applications write to simultaneously.
+Hardware audio devices are exclusive-access by default — only one application can use the output at a time. ALSA dmix creates a virtual shared PCM device that multiple applications write to simultaneously.
 
 ### How it works
 
@@ -142,15 +139,15 @@ pcm.squarepi_mix {
 pcm.!default squarepi_mix
 ```
 
-- **rate / format**: All sources are mixed at 48kHz S32_LE — this is why the SquarePi Upscaler™ and Resampler™ must run first
+- **rate / format**: All sources are mixed at 48kHz S32_LE — this is why upscaling and resampling must run first
 - **period_size / buffer_size**: Sized large (65536 frames) to prevent underruns when multiple heavy sources (MPD + Bluetooth) play simultaneously
 - **ipc_key**: Shared memory key used by ALSA for inter-process coordination
 
 All audio applications — MPD, BlueALSA (Bluetooth), upmpdcli (DLNA), shairport-sync (AirPlay) — write to `squarepi_mix`. The dmix layer sums all streams in real time and feeds a single stream to the hardware.
 
-### Up to 10 simultaneous sources
+### Multiple simultaneous sources
 
-The dmix layer supports many simultaneous writers. In practice, 10 devices can connect via different protocols (multiple Bluetooth devices, multiple MPD clients, DLNA) and all produce audio at the same time without interrupting each other.
+The dmix layer supports many simultaneous writers. Multiple Bluetooth devices, MPD clients, DLNA, and AirPlay can all produce audio at the same time without interrupting each other.
 
 ---
 
@@ -158,7 +155,7 @@ The dmix layer supports many simultaneous writers. In practice, 10 devices can c
 
 ### What it does
 
-15-band parametric equalizer running inside the TAS5805M amplifier chip. The equalization happens entirely in hardware — the Pi CPU does zero audio processing for EQ.
+15-band parametric equalizer running inside the TAS5805M chip. The Pi CPU handles no audio processing for equalization — it just sends I²C commands and the chip does the rest.
 
 ### How it works — hardware path
 
@@ -227,7 +224,7 @@ amixer -c LouderRaspberry sset "Equalizer" On    # EQ active
 
 **Balance** — per-channel gain:
 - Controls: `"Channel Left Gain"`, `"Channel Right Gain"`
-- Range: 0–110 (110 = 0 dB)
+- Range: 0–110 (110 = 0 dB) — inferred from driver, not Pi-verified
 - Formula: `L_raw = 110 - max(0, balance)` / `R_raw = 110 - max(0, -balance)`
 
 ### Persisting EQ state
@@ -247,8 +244,8 @@ Restored at every boot by `squarepi-alsa-restore.service` (runs before MPD start
 | Parameter | Value |
 |---|---|
 | THD+N | ≤ 0.03% at 1W, 1kHz |
-| SNR | ≥ 107 dB (A-weighted) |
-| Dynamic range | 106 dB (A-weighted) |
+| SNR | up to 107 dB (A-weighted, 24V / 8Ω) |
+| Dynamic range | up to 106 dB (A-weighted, 24V / 8Ω) |
 | Crosstalk | −100 dB at 1kHz |
 | Idle noise | < 40 µVRMS |
 | Parametric EQ | 15 bands per channel, full biquad |
@@ -279,7 +276,7 @@ The TAS5805M exposes hardware fault flags as read-only ALSA controls:
 | `Warning Over Temperature 134C` | Thermal warning |
 | `Warning Over Temperature 146C` | Thermal warning |
 
-The SquarePi EQ™ DSP UI polls these registers and displays live status. All faults self-clear when the condition resolves (e.g. speaker short removed, supply voltage normalised).
+The DSP UI polls these registers and displays live status. All faults self-clear when the condition resolves (e.g. speaker short removed, supply voltage normalised).
 
 ---
 

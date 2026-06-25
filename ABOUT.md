@@ -4,13 +4,9 @@
 
 ---
 
-## One-line description
-
 SquarePi is an open-source Raspberry Pi HAT that turns any Pi into a 2×30W hi-fi wireless speaker system — playable from Bluetooth, Spotify, AirPlay, DLNA, USB, and internet radio, all controlled from a browser with no app install.
 
-## Tagline
-
-*From square wave to every corner.*
+> *From square wave to every corner.*
 
 ---
 
@@ -32,13 +28,13 @@ Every audio source — Bluetooth audio from a phone, a 44.1kHz FLAC file from a 
 All incoming audio is automatically upscaled to **48kHz / 24-bit**. No user configuration required. The Raspberry Pi hardware clock runs approximately 10× more accurately at 48kHz than at 44.1kHz, making this the optimal operating point for the Pi's audio clock hardware.
 
 ### SquarePi Resampler™
-Sample rate conversion is handled by **SoXR** (Secret Rabbit Code Resampler) — the same polyphase resampling library used in professional mastering tools. A 44.1kHz CD track resamples to 48kHz via a 160:147 integer ratio using a "very high" quality filter. The result is mathematically transparent — audibly indistinguishable from a native 48kHz recording.
+Rate conversion uses **SoXR** — a polyphase resampling library used in professional mastering tools. 44.1kHz material resamples to 48kHz via a 160:147 integer ratio at "very high" quality.
 
 ### SquarePi Mixer™
-Multiple simultaneous sources — Bluetooth from a phone and DLNA from a laptop at the same time — share the audio output via an ALSA software dmix layer running at 48kHz / S32_LE (32-bit bus, preserving 24-bit content). Up to 10 devices can connect and control playback simultaneously. No source pauses another.
+Multiple simultaneous sources — Bluetooth from a phone and DLNA from a laptop at the same time — share the output via ALSA dmix at 48kHz / S32_LE. No source pauses another.
 
 ### SquarePi EQ™
-15-band hardware DSP equalizer running directly inside the TAS5805M chip over I²C. Zero CPU load on the Pi. Zero latency. 13 built-in presets. Full manual control via a browser-based visual interface. Settings survive power cycles via ALSA state storage.
+15-band parametric EQ running inside the TAS5805M chip over I²C. The Pi CPU handles no audio processing for equalization. 13 built-in presets, full manual control via browser, settings saved across power cycles.
 
 ---
 
@@ -47,12 +43,12 @@ Multiple simultaneous sources — Bluetooth from a phone and DLNA from a laptop 
 | Parameter | Value |
 |---|---|
 | Output power | 2×30W stereo Class-D (4Ω at 24V) |
-| Audio pipeline | 48kHz / 24-bit, SquarePi Upscaler™ automatic |
-| Resampling | SoXR polyphase, "very high" quality, SquarePi Resampler™ |
-| EQ | 15-band hardware DSP in TAS5805M, ±15 dB per band, SquarePi EQ™ |
+| Audio pipeline | 48kHz / 24-bit, automatic on all sources |
+| Resampling | SoXR polyphase, "very high" quality |
+| EQ | 15-band hardware DSP in TAS5805M, ±15 dB per band |
 | THD+N | ≤ 0.03% at 1W, 1kHz |
-| SNR | ≥ 107 dB (A-weighted) |
-| Dynamic range | 106 dB (A-weighted) |
+| SNR | up to 107 dB (A-weighted, 24V / 8Ω) |
+| Dynamic range | up to 106 dB (A-weighted, 24V / 8Ω) |
 | Crosstalk | −100 dB at 1kHz |
 | Board | 65×61mm, 2-layer, standard RPi 40-pin HAT |
 | Power input | 12–24V DC, barrel jack (powers Pi too — no separate Pi power supply needed) |
@@ -69,7 +65,7 @@ Multiple simultaneous sources — Bluetooth from a phone and DLNA from a laptop 
 | DLNA / UPnP | Windows Media Player, Kodi, VLC, BubbleUPnP, any DLNA app |
 | Spotify Connect | Native Spotify app control, 320kbps, Premium required |
 | AirPlay | iPhone, iPad, Mac, no Apple account needed |
-| USB Drive | Plug and play, auto-library scan, FAT32/exFAT/ext4 |
+| USB Drive | Mount and scan with `mpc update`, FAT32/exFAT/ext4 |
 | Internet Radio | Built-in via MPD, add streams in myMPD |
 | MPD clients | Any MPD-compatible app, auto-discovered via Zeroconf |
 
@@ -146,7 +142,7 @@ Requires Raspberry Pi OS Lite — Bookworm (Debian 12) or Trixie (Debian 13).
 | Data collection | **None** | Yes | Yes |
 | Subscription | **None** | Some features | Some features |
 | Protocols | **7 simultaneous** | Limited | Limited |
-| EQ | **15-band hardware DSP** | App-only, limited | App-only, limited |
+| EQ | **15-band hardware DSP** | 3-band app sliders | 3-band app sliders |
 | 48kHz/24-bit upscaling | **SquarePi Upscaler™** | No | No |
 | Open source | **Fully (MIT)** | No | No |
 | Hackable / forkable | **Yes** | No | No |

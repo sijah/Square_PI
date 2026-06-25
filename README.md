@@ -109,7 +109,7 @@ Open `http://squarepi.local:8081` for the full real-time DSP control panel.
 - **Custom preset** — save your own curve
 - **Analog Gain** — hardware output trim (0 to −15.5 dB)
 - **Balance** — L/R pan
-- **Mixer Mode** — Stereo / Mono / Left Only / Right Only / Custom matrix
+- **Mixer Mode** — `Stereo` / `Mono` / `Left` / `Right` (crossfeed matrix via separate L2L / R2L / L2R / R2R gain controls)
 - **Save to chip** — settings survive power cycles (`alsactl store`)
 
 Terminal access via `alsamixer` → `F6` → `LouderRaspberry`.
@@ -139,7 +139,7 @@ Green = clear. Red = active. All faults self-clear when the condition resolves.
 
 | Interface | Address | Notes |
 |---|---|---|
-| myMPD web UI | `http://squarepi.local:8080` | Mobile-optimised, always installed |
+| myMPD web UI | `http://squarepi.local:8080` · `https://squarepi.local:8443` | Mobile-optimised, always installed |
 | EQ DSP UI | `http://squarepi.local:8081` | With `--with-eq` |
 | MPD (music apps) | `squarepi.local:6600` | Auto-discovered by M.A.L.P, MPDroid, Cantata |
 | DLNA renderer | Appears as `SquarePi` in DLNA apps | With `--with-dlna` |
@@ -246,7 +246,7 @@ Open myMPD: `http://squarepi.local:8080`
 | Data collection | **None** | Yes | Yes |
 | Subscription | **None** | Some features | Some features |
 | Protocols | **BT · DLNA · Spotify · AirPlay · USB · Radio** | BT · AirPlay · Spotify | BT · AirPlay |
-| EQ | **15-band hardware DSP** | App-based, 5 presets | App-based, 3 presets |
+| EQ | **15-band hardware DSP** | 3-band app sliders | 3-band app sliders |
 | Audio upscaling | **48kHz / 24-bit** | None | None |
 | Open source | **Yes (MIT)** | No | No |
 | Setup | **One command** | App + account | App + account |
@@ -284,8 +284,8 @@ Open myMPD: `http://squarepi.local:8080`
 | Parameter | Value |
 |---|---|
 | THD+N | ≤ 0.03% at 1W, 1kHz |
-| SNR | ≥ 107 dB (A-weighted) |
-| Dynamic range | 106 dB (A-weighted) |
+| SNR | up to 107 dB (A-weighted, 24V / 8Ω) |
+| Dynamic range | up to 106 dB (A-weighted, 24V / 8Ω) |
 | Crosstalk | −100 dB at 1kHz |
 | Parametric EQ | 15 bands per channel, full biquad |
 | DRC | 3-band, 4th-order |

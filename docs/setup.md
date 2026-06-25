@@ -86,7 +86,7 @@ Accept the host key fingerprint when prompted.
 curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --all
 ```
 
-This installs everything: MPD, myMPD, Bluetooth, DLNA, Spotify Connect, AirPlay, and the SquarePi EQ™ visual DSP interface.
+This installs everything: MPD, myMPD, Bluetooth, DLNA, Spotify Connect, AirPlay, and the visual DSP interface.
 
 ### Choose specific features
 
@@ -94,7 +94,7 @@ This installs everything: MPD, myMPD, Bluetooth, DLNA, Spotify Connect, AirPlay,
 |---|---|
 | *(no flags)* | MPD + myMPD + EQ presets + sleep timer (base) |
 | `--with-bt` | Bluetooth A2DP |
-| `--with-eq` | SquarePi EQ™ visual DSP interface |
+| `--with-eq` | Visual DSP interface (EQ, gain, balance, mixer) |
 | `--with-dlna` | DLNA/UPnP renderer |
 | `--with-spotify` | Spotify Connect |
 | `--with-airplay` | AirPlay |
@@ -177,9 +177,9 @@ In a browser on the same network:
 http://squarepi.local:8080
 ```
 
-Mobile browsers work — no app required.
+If your browser redirects to HTTPS, use `https://squarepi.local:8443` and accept the self-signed certificate. Mobile browsers work — no app required.
 
-### Open SquarePi EQ™ (if installed with `--with-eq`)
+### Open the DSP interface (if installed with `--with-eq`)
 
 ```
 http://squarepi.local:8081
@@ -243,8 +243,8 @@ mpc update
 
 | Interface | Address |
 |---|---|
-| myMPD | `http://squarepi.local:8080` |
-| SquarePi EQ™ | `http://squarepi.local:8081` |
+| myMPD | `http://squarepi.local:8080` · `https://squarepi.local:8443` |
+| DSP UI | `http://squarepi.local:8081` |
 | MPD | `squarepi.local:6600` |
 | DLNA renderer | Appears as `SquarePi` in DLNA apps |
 
@@ -324,7 +324,7 @@ Restart myMPD:
 sudo systemctl restart mympd
 ```
 
-### SquarePi EQ™ not loading
+### DSP UI not loading
 
 ```bash
 systemctl status squarepi-eq

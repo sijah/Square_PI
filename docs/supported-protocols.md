@@ -1,26 +1,22 @@
 # SquarePi — Supported Protocols
 
-SquarePi supports seven audio input protocols. All sources pass through the **SquarePi Audio Engine™** — upscaled to 48kHz/24-bit, resampled, mixed, and equalized automatically.
-
-All protocols can be active simultaneously. The **SquarePi Mixer™** handles multi-source sharing with no quality loss and no mutual interruption.
+SquarePi accepts audio from seven sources. All are upscaled, resampled, and equalized automatically. Multiple protocols can be active at the same time — ALSA dmix mixes them in software so nothing pauses anything else.
 
 ---
 
 ## Bluetooth A2DP (`--with-bt`)
 
-**What it is:** Wireless audio streaming from any Bluetooth device.
+Wireless audio from any phone, tablet, or laptop.
 
-**How to use:**
-1. Open Bluetooth settings on your phone or tablet
-2. Scan for devices — **SquarePi** appears in the list
-3. Tap pair — no PIN required, pairing is automatic
-4. Play audio — it routes immediately to SquarePi
+1. Open Bluetooth settings on your device
+2. Scan — **SquarePi** appears in the list
+3. Tap pair — no PIN, no confirmation on the Pi
+4. Play audio
 
-**Key facts:**
-- Codec: SBC (standard; AAC not available in Raspberry Pi OS `bluez-alsa-utils`)
-- Auto-accept pairing: no PIN, no confirmation required on the Pi
-- Always discoverable: the adapter stays discoverable and pairable after every reboot via `squarepi-bt-setup.service`
-- Simultaneous: Bluetooth and other sources play at the same time via SquarePi Mixer™
+Notes:
+- Codec: SBC (AAC is not available in the Raspberry Pi OS `bluez-alsa-utils` package)
+- The adapter stays discoverable and pairable after every reboot — `squarepi-bt-setup.service` handles it
+- Plays alongside other sources without pausing either side
 
 **Troubleshooting:**
 
@@ -55,27 +51,21 @@ sudo systemctl restart bluetooth squarepi-bt-agent squarepi-bt-setup
 
 ## DLNA / UPnP (`--with-dlna`)
 
-**What it is:** Stream from any DLNA-compatible device or app on the same network.
+Stream from any DLNA-compatible app on the same network.
 
-**Compatible apps and devices:**
-- Windows Media Player (Windows 10/11)
-- Kodi
-- VLC (Playback → Renderer → SquarePi-UPnP/AV)
-- BubbleUPnP (Android)
-- Any UPnP/DLNA controller
+Compatible apps: Windows Media Player, Kodi, VLC (Playback → Renderer → SquarePi-UPnP/AV), BubbleUPnP, or any UPnP/DLNA controller.
 
-**How to use:**
 1. Open your DLNA app
 2. Select **SquarePi** as the playback renderer
-3. Browse and play — audio streams to SquarePi
+3. Browse and play
 
-**Key facts:**
-- Implemented via `upmpdcli` — bridges DLNA control to MPD
-- Advertised via avahi/mDNS — appears automatically on the network
-- protocolinfo restricts advertised formats to MP3/FLAC/OGG/MP4, preventing raw L16 PCM delivery from Windows Media Player (which would cause WiFi jitter at 1.5 Mbps)
-- If avahi restarts, restart upmpdcli: `sudo systemctl restart upmpdcli`
+Notes:
+- Implemented via `upmpdcli`, which bridges DLNA control to MPD
+- Appears on the network automatically via avahi/mDNS
+- protocolinfo is set to restrict advertised formats to MP3/FLAC/OGG/MP4 — without this, Windows Media Player serves raw L16 PCM (1.5 Mbps) instead of MP3, which causes WiFi jitter
+- If avahi restarts, upmpdcli needs a restart too: `sudo systemctl restart upmpdcli`
 
-**Known limitation:** Some DLNA controllers (WMP, Kodi) push a track to the MPD queue but do not auto-trigger play. If audio does not start, run `mpc play` on the Pi. This is a upmpdcli/OpenHome interaction issue under investigation.
+**Known issue:** Some DLNA controllers (WMP, Kodi) push a track to the MPD queue but don't trigger play. If audio doesn't start, run `mpc play` on the Pi. This is a upmpdcli/OpenHome interaction issue, not yet fixed.
 
 **Troubleshooting:**
 ```bash
@@ -87,19 +77,16 @@ journalctl -u upmpdcli -n 30
 
 ## Spotify Connect (`--with-spotify`)
 
-**What it is:** SquarePi appears as a speaker inside the official Spotify app — control playback directly without any extra app.
+SquarePi appears as a speaker inside the Spotify app — no extra app or configuration needed.
 
-**How to use:**
 1. Open Spotify on your phone, tablet, or desktop
-2. Tap the **Devices** icon (bottom of player)
+2. Tap the **Devices** icon at the bottom of the player
 3. Select **SquarePi**
-4. Playback routes immediately to SquarePi
 
-**Key facts:**
+Notes:
 - Requires Spotify Premium
-- Implemented via `raspotify`
-- Bitrate: 320 kbps
-- MPD automatically pauses when Spotify starts playing
+- Implemented via `raspotify`, 320 kbps
+- MPD pauses automatically when Spotify starts
 
 **Troubleshooting:**
 ```bash
@@ -113,24 +100,17 @@ If SquarePi does not appear in Spotify, check that raspotify is running and the 
 
 ## AirPlay (`--with-airplay`)
 
-**What it is:** Stream from any Apple device or AirPlay-compatible app.
+Stream from iPhone, iPad, Mac, or any AirPlay-compatible app.
 
-**How to use:**
+On iPhone or iPad: swipe down → tap AirPlay in Now Playing → select **SquarePi**.
 
-On iPhone or iPad:
-1. Swipe down for Control Centre
-2. Tap the AirPlay icon in the Now Playing widget
-3. Select **SquarePi**
+On Mac: click the AirPlay icon in the menu bar → select **SquarePi**.
 
-On Mac:
-1. Click the AirPlay icon in the menu bar
-2. Select **SquarePi**
-
-**Key facts:**
+Notes:
 - Implemented via `shairport-sync`
 - No Apple account required
-- Works with any AirPlay-compatible app (Apple Music, Spotify, VLC, Doppler, etc.)
-- MPD automatically pauses when an AirPlay session starts
+- Works with Apple Music, Spotify, VLC, and any other AirPlay app
+- MPD pauses automatically when an AirPlay session starts
 
 **Troubleshooting:**
 ```bash
@@ -142,15 +122,9 @@ journalctl -u shairport-sync -n 30
 
 ## USB Drive
 
-**What it is:** Plug in a USB drive and MPD scans it automatically.
+FAT32, exFAT, and ext4 drives work. exfatprogs is installed automatically.
 
-**Supported formats:** FAT32, exFAT, ext4 (exfatprogs installed automatically by the installer)
-
-**How to use:**
-1. Plug in the USB drive
-2. Mount it (see below)
-3. Point MPD at the mount point
-4. Run `mpc update` to scan
+To use a USB drive you need to mount it and point MPD at the mount point — it doesn't auto-mount. Steps:
 
 **Quick mount (testing):**
 
@@ -195,34 +169,23 @@ mpc update
 
 ## Internet Radio
 
-**What it is:** Stream internet radio stations directly through MPD.
+MPD handles HTTP streams natively — no extra software needed.
 
-**How to use:**
+In myMPD: Browse → Webradio → add a station URL or search the built-in directory.
 
-In myMPD:
-1. Browse → Webradio
-2. Add a station URL or search the built-in directory
-3. Play
-
-**Direct MPD:**
+Or directly:
 ```bash
 mpc add http://some-stream-url/stream.mp3
 mpc play
 ```
 
-**Key facts:**
-- No extra software needed — MPD handles HTTP streams natively
-- 2 MB HTTP input cache buffers streams against WiFi jitter (`input_cache` in mpd.conf)
-- 8 MB output buffer prevents underruns during high-quality streams (`audio_buffer_size`)
-- Any SHOUTcast/Icecast stream URL works
+Any SHOUTcast or Icecast URL works. MPD is configured with a 2 MB HTTP input cache to buffer against WiFi jitter, and an 8 MB output buffer to prevent underruns on high-bitrate streams.
 
 ---
 
 ## MPD Clients
 
-**What it is:** Any MPD-compatible music player app can connect to SquarePi directly.
-
-**Auto-discovery:** MPD advertises itself via Zeroconf (`_mpd._tcp`). Apps that support auto-discovery will find SquarePi without any manual server entry.
+Any MPD-compatible app can connect to SquarePi directly. MPD advertises itself via Zeroconf (`_mpd._tcp`), so apps that support auto-discovery find it without any manual server entry.
 
 **Compatible apps:**
 
