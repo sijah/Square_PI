@@ -1,0 +1,194 @@
+# SquarePi — About This Project
+
+*This document is for journalists, bloggers, reviewers, and anyone who wants to write about or feature SquarePi.*
+
+---
+
+## One-line description
+
+SquarePi is an open-source Raspberry Pi HAT that turns any Pi into a 2×30W hi-fi wireless speaker system — playable from Bluetooth, Spotify, AirPlay, DLNA, USB, and internet radio, all controlled from a browser with no app install.
+
+## Tagline
+
+*From square wave to every corner.*
+
+---
+
+## What It Is
+
+SquarePi is a custom PCB — designed from scratch in KiCad, fabricated at JLCPCB — that plugs onto a Raspberry Pi's 40-pin GPIO header and turns it into a complete headless hi-fi music player.
+
+The board is built around the Texas Instruments TAS5805M: a Class-D amplifier with a full hardware DSP built in. That chip alone handles 2×30W of output power plus 15-band parametric EQ, DRC, and gain control — all over I²C, zero extra hardware.
+
+The software side is a one-command installer that configures everything automatically: audio driver, music player, web UI, Bluetooth, DLNA, Spotify Connect, AirPlay, and a visual EQ interface. After one reboot it's reachable at `squarepi.local` from any device on the same network. No IP address. No app install. No account.
+
+---
+
+## The SquarePi Audio Engine™
+
+Every audio source — Bluetooth audio from a phone, a 44.1kHz FLAC file from a USB stick, a 320kbps Spotify stream — passes through four automatic processing stages before it reaches the speakers.
+
+### SquarePi Upscaler™
+All incoming audio is automatically upscaled to **48kHz / 24-bit**. No user configuration required. The Raspberry Pi hardware clock runs approximately 10× more accurately at 48kHz than at 44.1kHz, making this the optimal operating point for the Pi's audio clock hardware.
+
+### SquarePi Resampler™
+Sample rate conversion is handled by **SoXR** (Secret Rabbit Code Resampler) — the same polyphase resampling library used in professional mastering tools. A 44.1kHz CD track resamples to 48kHz via a 160:147 integer ratio using a "very high" quality filter. The result is mathematically transparent — audibly indistinguishable from a native 48kHz recording.
+
+### SquarePi Mixer™
+Multiple simultaneous sources — Bluetooth from a phone and DLNA from a laptop at the same time — share the audio output via an ALSA software dmix layer running at 48kHz / S32_LE (32-bit bus, preserving 24-bit content). Up to 10 devices can connect and control playback simultaneously. No source pauses another.
+
+### SquarePi EQ™
+15-band hardware DSP equalizer running directly inside the TAS5805M chip over I²C. Zero CPU load on the Pi. Zero latency. 13 built-in presets. Full manual control via a browser-based visual interface. Settings survive power cycles via ALSA state storage.
+
+---
+
+## Key Specifications
+
+| Parameter | Value |
+|---|---|
+| Output power | 2×30W stereo Class-D (4Ω at 24V) |
+| Audio pipeline | 48kHz / 24-bit, SquarePi Upscaler™ automatic |
+| Resampling | SoXR polyphase, "very high" quality, SquarePi Resampler™ |
+| EQ | 15-band hardware DSP in TAS5805M, ±15 dB per band, SquarePi EQ™ |
+| THD+N | ≤ 0.03% at 1W, 1kHz |
+| SNR | ≥ 107 dB (A-weighted) |
+| Dynamic range | 106 dB (A-weighted) |
+| Crosstalk | −100 dB at 1kHz |
+| Board | 65×61mm, 2-layer, standard RPi 40-pin HAT |
+| Power input | 12–24V DC, barrel jack (powers Pi too — no separate Pi power supply needed) |
+| Parts cost | Under $30 |
+| Design | KiCad, fabricated JLCPCB |
+
+---
+
+## Supported Protocols
+
+| Protocol | Notes |
+|---|---|
+| Bluetooth A2DP | Auto-pair, no PIN, always discoverable, SBC codec |
+| DLNA / UPnP | Windows Media Player, Kodi, VLC, BubbleUPnP, any DLNA app |
+| Spotify Connect | Native Spotify app control, 320kbps, Premium required |
+| AirPlay | iPhone, iPad, Mac, no Apple account needed |
+| USB Drive | Plug and play, auto-library scan, FAT32/exFAT/ext4 |
+| Internet Radio | Built-in via MPD, add streams in myMPD |
+| MPD clients | Any MPD-compatible app, auto-discovered via Zeroconf |
+
+---
+
+## EQ Presets (13)
+
+Flat · Bass Boost · Treble · Vocal · Night Mode · Late Night · Rock · Pop · Jazz · Classical · Club · Hip-Hop · Acoustic
+
+All presets available in myMPD Scripts (tap to apply) and in the visual DSP interface. Custom presets: dial in any curve and save it.
+
+---
+
+## Control Interfaces
+
+| Interface | URL | Notes |
+|---|---|---|
+| myMPD web UI | `http://squarepi.local:8080` | Mobile-optimised, always installed |
+| SquarePi EQ™ DSP | `http://squarepi.local:8081` | Visual 15-band EQ, optional (`--with-eq`) |
+| MPD | `squarepi.local:6600` | For dedicated music player apps |
+| DLNA renderer | Appears in DLNA apps as `SquarePi` | Optional (`--with-dlna`) |
+
+Sleep timer: 30 / 60 / 90 min + cancel — one tap in myMPD Scripts, no extra install.
+
+---
+
+## Setup
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --all
+```
+
+The installer:
+- Auto-detects the TAS5805M I²C address on buses 1 and 2 (0x2c–0x2f)
+- Configures the audio driver, I2S overlay, and boot config
+- Installs MPD, myMPD, ALSA utilities
+- Configures 48kHz/24-bit audio pipeline with SoXR resampling
+- Installs all 13 EQ presets and sleep timer scripts
+- Optionally adds Bluetooth, DLNA, Spotify Connect, AirPlay, and visual DSP UI
+- Sets hostname to `squarepi`, enables mDNS
+- Starts all services and verifies they are running
+- No reboot required unless using `--with-bt` (Bluetooth needs kernel module reload)
+
+---
+
+## Why It Exists
+
+Commercial wireless speakers cost $150–$500, require cloud accounts, collect usage data, and push firmware updates that change or remove features. SquarePi costs under $30 in parts, runs entirely locally, collects nothing, and does exactly what it does forever — because you own the code.
+
+It started as a personal project: a compact, good-sounding amp board for a Raspberry Pi Zero 2W that I could leave running in a room with no screen, no keyboard, and no ongoing attention. The design became a full system with a web UI and multi-protocol support, so it got open-sourced.
+
+---
+
+## Compatibility
+
+| Pi Model | Status |
+|---|---|
+| Pi Zero 2W | Primary target — tested, recommended |
+| Pi 3B+ | Tested |
+| Pi 4B | Tested |
+| Pi 5 | In development |
+
+Requires Raspberry Pi OS Lite — Bookworm (Debian 12) or Trixie (Debian 13).
+
+---
+
+## SquarePi vs Commercial Alternatives
+
+| | **SquarePi** | Sonos Era 100 | Amazon Echo Studio |
+|---|---|---|---|
+| Price | **< $30 parts** | $249 | $199 |
+| Cloud required | **Never** | Always | Always |
+| Account required | **None** | Sonos account | Amazon account |
+| Data collection | **None** | Yes | Yes |
+| Subscription | **None** | Some features | Some features |
+| Protocols | **7 simultaneous** | Limited | Limited |
+| EQ | **15-band hardware DSP** | App-only, limited | App-only, limited |
+| 48kHz/24-bit upscaling | **SquarePi Upscaler™** | No | No |
+| Open source | **Fully (MIT)** | No | No |
+| Hackable / forkable | **Yes** | No | No |
+| Setup | **One command** | App + account | App + account |
+
+---
+
+## Who It's For
+
+- **Makers and hobbyists** who want a serious audio project with real specs
+- **Non-technical families** who want wireless music without cloud lock-in
+- **DIY audio community** — open hardware, open software, real datasheets
+- **Privacy-conscious users** — no cloud, no account, no data collection, ever
+- **Anyone who wants music they own and control** — on hardware they built
+
+---
+
+## Repository
+
+**GitHub:** [github.com/sijah/Square_PI](https://github.com/sijah/Square_PI)
+
+```
+squarepi-installer/
+  install.sh         — main installer (bash, self-contained)
+  uninstall.sh       — clean uninstaller
+  eq-server.py       — DSP web UI server (Python stdlib, port 8081)
+docs/
+  audio-engine.md    — deep dive on SquarePi Audio Engine™
+  supported-protocols.md
+  setup.md
+README.md
+ABOUT.md             — this file
+```
+
+Hardware design files (Gerbers, BOM, KiCad project): [Releases](https://github.com/sijah/Square_PI/releases)
+
+---
+
+## License
+
+MIT. Use it, fork it, build on it. Attribution appreciated.
+
+---
+
+*From square wave to every corner.* — [Sijah AK](https://github.com/sijah)

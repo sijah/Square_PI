@@ -1,272 +1,74 @@
 # SquarePi
 
-SquarePi is an open-source Raspberry Pi audio streamer with a built-in 2×30W DSP amplifier. One installer turns any Pi into a headless network player — no config files, no IP addresses to remember.
+[![Version](https://img.shields.io/badge/installer-v1.3.2-blue)](https://github.com/sijah/Square_PI/releases)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.com)
+[![Hardware](https://img.shields.io/badge/hardware-TAS5805M-orange)](docs/audio-engine.md)
+[![Stars](https://img.shields.io/github/stars/sijah/Square_PI?style=social)](https://github.com/sijah/Square_PI)
 
-**Stream from:** Bluetooth · Spotify Connect · AirPlay · DLNA · MPD  
-**Control with:** 15-band EQ web interface · EQ presets · Sleep timer · Real-time fault monitor
+**A Raspberry Pi HAT that turns any Pi into a 2×30W hi-fi wireless speaker system.**
 
-*From square wave to every corner.* — Sijah AK
+Powered by the **SquarePi Audio Engine™** — featuring SquarePi Upscaler™, SquarePi Resampler™, SquarePi Mixer™, and SquarePi EQ™ — all running automatically from a single install command.
+
+> *From square wave to every corner.* — Sijah AK
 
 ![SquarePi v1.0 wiring diagram](docs/images/squarepi-v1-wiring-diagram.png)
 
 ---
 
-## Hardware
+## At a glance
 
-SquarePi hardware revision: **v1.0**
-
-A compact Class-D amplifier HAT for Raspberry Pi, built around the Texas Instruments TAS5805M DSP amplifier chip.
-
-### Specifications
-
-- **Output power:** 2×13W into 4Ω at 12V · 2×23W into 8Ω at 24V · 2×30W into 4Ω at 24V
-- **Audio input:** I2S digital from Raspberry Pi GPIO
-- **DSP control:** I2C — EQ, DRC, crossover, gain, all programmable
-- **Supply:** 12–24V DC, single barrel jack input
-- **Form factor:** Standard Raspberry Pi HAT, 40-pin GPIO passthrough
-- **Output:** Screw terminal speaker connectors
-- **Extras:** IR receiver footprint, status LEDs, HAT EEPROM
-
-### Raspberry Pi compatibility
-
-Raspberry Pi 5 · 4B · 3B+ · 3B · Zero 2 W · Zero W
-
-### Power wiring
-
-| Supply voltage | Min current | Output |
-|---|---|---|
-| 12V | 3A | ~13W/ch into 4Ω |
-| 19V | 3A | ~20W/ch into 8Ω |
-| 24V | 3A | ~23W/ch into 8Ω |
-
-### Speaker terminals
-
-| Terminal | Connection |
+| | |
 |---|---|
-| `LP` | Left speaker + |
-| `LN` | Left speaker − |
-| `RN` | Right speaker − |
-| `RP` | Right speaker + |
-
-> Check polarity before powering on. Use passive 4–8Ω speakers only. Never connect speakers while powered.
-
-### Thermal guidance
-
-SquarePi is designed for heatsink-less operation. For best long-term reliability:
-
-- Use **12V with 8Ω speakers** for cool, continuous operation
-- Avoid sustained high-volume playback with 4Ω speakers above 12V
-- The TAS5805M includes automatic thermal foldback — it reduces output power at high temperature and recovers automatically
-
-| Parameter | Recommended |
-|---|---|
-| Supply | 12V DC |
-| Speakers | 8Ω preferred, 4Ω supported |
-| Continuous power | 6–7W per channel |
-| Ambient | ≤35°C for sustained loud playback |
+| Output | **2×30W** stereo Class-D |
+| Audio quality | **48kHz / 24-bit** — SquarePi Upscaler™ automatic |
+| Cost | **Under $30** in parts |
+| Protocols | **7** — BT · DLNA · Spotify · AirPlay · USB · Radio · MPD |
+| Setup | **One command** — `sudo bash install.sh --all` |
+| Control | **Browser UI** — `squarepi.local`, no app install |
+| Cloud | **None** — fully local, no account, no subscription |
 
 ---
 
-## Requirements
+## What it plays from
 
-- Raspberry Pi (Zero 2 W, 3, 4, or 5)
-- Raspberry Pi OS Lite — Bookworm (Debian 12) or Trixie (Debian 13)
-- SquarePi HAT connected
-- Internet connection on the Pi
-- SSH or local terminal access
-- Run as root with `sudo`
+All sources pass through the **SquarePi Audio Engine™** automatically.
+
+| Protocol | How it works |
+|---|---|
+| **Bluetooth A2DP** | Pair any phone or tablet — no PIN, auto-pair, always discoverable |
+| **DLNA / UPnP** | Stream from Windows Media Player, Kodi, VLC, or any DLNA app |
+| **Spotify Connect** | SquarePi appears as a speaker in the Spotify app (Premium required) |
+| **AirPlay** | Stream from iPhone, iPad, Mac — no Apple account needed |
+| **USB Drive** | Plug in a drive — library auto-scans, no steps required |
+| **Internet Radio** | Built-in streaming, hundreds of stations, no extra app |
+| **MPD clients** | Any MPD-compatible app on any OS auto-discovers SquarePi |
+
+All seven sources can be active simultaneously. **SquarePi Mixer™** handles multi-source sharing at the ALSA layer with no quality loss.
 
 ---
 
-## Quick install
+## SquarePi Audio Engine™
 
-SSH into your Pi and choose the combination that fits.
+Every source — Bluetooth SBC from a phone, MP3 from a USB stick, 44.1kHz FLAC from DLNA — passes through four automatic processing stages before it reaches your speakers.
 
-### Base install — MPD + myMPD
+### 1 — SquarePi Upscaler™
+All incoming audio is automatically upscaled to **48kHz / 24-bit**. No settings. No configuration. The Pi hardware clock runs 10× more accurately at 48kHz than at 44.1kHz, so this is both the correct native rate and the optimal quality operating point.
 
-Music player with web UI, mDNS discovery, 13 EQ presets, and sleep timer via myMPD Scripts.
+### 2 — SquarePi Resampler™
+Sample rate conversion is handled by **SoXR** — the same polyphase resampling library used in professional audio tools. A 44.1kHz CD track converts to 48kHz via a mathematically transparent 160:147 ratio with "very high" quality filter. The conversion is audibly indistinguishable from a native 48kHz source.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash
-```
+### 3 — SquarePi Mixer™
+Multiple sources — Bluetooth and DLNA simultaneously, for example — share the audio output through an ALSA software dmix layer running at 48kHz / S32_LE. Up to 10 devices can connect and control playback at the same time. No source pauses another. No clicks or dropouts between streams.
 
-### With Bluetooth A2DP
-
-Adds wireless audio streaming from any phone or tablet.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-bt
-```
-
-### With Advanced DSP web interface
-
-Adds a full-page DSP control panel at `http://squarepi.local:8081` — 15-band EQ, gain, balance, mixer, and real-time fault monitoring.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-eq
-```
-
-### With DLNA renderer
-
-Adds a UPnP/DLNA renderer — stream from any DLNA-capable app or device on the network.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-dlna
-```
-
-### With Spotify Connect
-
-Adds Spotify Connect — SquarePi appears as a speaker in the Spotify app (requires Spotify Premium).
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-spotify
-```
-
-### With AirPlay
-
-Adds AirPlay receiver — stream from any Apple device or AirPlay-compatible app.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --with-airplay
-```
-
-### Everything together
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --all --with-eq
-```
-
-### Or clone and run locally
-
-```bash
-git clone https://github.com/sijah/Square_PI.git
-cd Square_PI/squarepi-installer
-
-sudo bash install.sh                    # MPD + myMPD only
-sudo bash install.sh --with-bt          # + Bluetooth A2DP
-sudo bash install.sh --with-eq          # + Advanced DSP UI
-sudo bash install.sh --with-dlna        # + DLNA/UPnP renderer
-sudo bash install.sh --with-spotify     # + Spotify Connect
-sudo bash install.sh --with-airplay     # + AirPlay
-sudo bash install.sh --all --with-eq    # everything
-```
-
-Reboot after the installer finishes:
-
-```bash
-sudo reboot
-```
-
-To opt into automatic reboot:
-
-```bash
-sudo SQUAREPI_AUTO_REBOOT=1 bash install.sh --with-bt --with-eq
-```
+### 4 — SquarePi EQ™
+15-band hardware DSP equalizer running directly inside the TAS5805M amplifier chip over I²C. Zero CPU load. Zero latency. The EQ runs entirely in the amplifier — the Pi does no audio processing for equalization. [Full technical details →](docs/audio-engine.md)
 
 ---
 
-## After reboot
+## SquarePi EQ™
 
-Verify the audio card is loaded:
-
-```bash
-aplay -l
-```
-
-You should see a card named `LouderRaspberry`. If it is missing, check `dmesg | grep -i tas58`.
-
-Test audio output:
-
-```bash
-speaker-test -D plughw:LouderRaspberry,0 -t sine -f 1000 -c 2
-```
-
-Open myMPD:
-
-```
-http://squarepi.local:8080
-```
-
-Open the DSP interface (if installed with `--with-eq`):
-
-```
-http://squarepi.local:8081
-```
-
-> **First boot defaults:** MPD starts at **25% volume**. EQ is initialised to **flat** (all bands 0 dB). Adjust volume in myMPD and use the DSP UI or myMPD Scripts to apply an EQ preset.
-
----
-
-## What gets installed
-
-### Always installed
-
-| Component | Purpose |
-|---|---|
-| `tas58xx` kernel driver | SquarePi I2S/I2C amplifier driver |
-| Boot overlay | Enables I2S, loads the SquarePi audio overlay |
-| `mpd` | Music Player Daemon |
-| `mpc` | MPD command-line client |
-| `alsa-utils` | `aplay`, `alsamixer`, `speaker-test` |
-| `mympd` | Mobile-friendly web UI for MPD |
-| `avahi-daemon` | mDNS — makes `squarepi.local` work on any network |
-| `exfatprogs` | exFAT USB flash drive support |
-| EQ preset Lua scripts | 13 one-tap presets in myMPD under Scripts |
-| Sleep timer Lua scripts | Sleep 30 / 60 / 90 min + Cancel in myMPD under Scripts |
-| `squarepi-eq-init.service` | Sets EQ to flat on first boot, then disables itself |
-
-### With `--with-bt`
-
-| Component | Purpose |
-|---|---|
-| `bluez` + `bluez-tools` | Bluetooth stack |
-| `bluez-alsa-utils` | BlueALSA, routes Bluetooth audio to ALSA |
-| `squarepi-bt-agent` | Auto-accept pairing, no PIN required |
-
-### With `--with-eq`
-
-| Component | Purpose |
-|---|---|
-| `squarepi-eq-server.py` | DSP web UI served on port 8081 |
-| `squarepi-eq.service` | Systemd unit, starts after sound target |
-| `squarepi-alsa-restore.service` | Restores saved EQ state at every boot |
-
-### With `--with-dlna`
-
-| Component | Purpose |
-|---|---|
-| `upmpdcli` | UPnP/DLNA renderer, bridges MPD to DLNA |
-
----
-
-## Network access
-
-After reboot SquarePi is reachable by hostname — no IP address needed.
-
-| Interface | Address |
-|---|---|
-| myMPD web UI | `http://squarepi.local:8080` |
-| Advanced DSP UI | `http://squarepi.local:8081` *(if `--with-eq`)* |
-| MPD (music apps) | `squarepi.local:6600` |
-| DLNA renderer | Appears as `SquarePi` in DLNA/UPnP apps *(if `--with-dlna`)* |
-
-MPD advertises itself via Zeroconf (`_mpd._tcp`). Apps like [M.A.L.P](https://f-droid.org/packages/org.gateshipone.malp/), MPDroid, and Cantata auto-discover SquarePi — no manual server entry needed.
-
-Set a custom hostname during install:
-
-```bash
-sudo SQUAREPI_HOSTNAME=squarepi bash install.sh
-```
-
----
-
-## DSP and EQ
-
-SquarePi uses the TAS5805M onboard DSP — 15 fully programmable biquad EQ bands, 3-band DRC, automatic gain limiting, and thermal foldback. All controlled over I²C with no external DSP chip.
-
-### Option 1 — EQ presets in myMPD (everyone)
-
-All 13 presets are installed for everyone — no extra flag needed. Find them in myMPD under **Scripts**:
+### 13 Presets
 
 | Preset | Character |
 |---|---|
@@ -284,24 +86,9 @@ All 13 presets are installed for everyone — no extra flag needed. Find them in
 | EQ Hip-Hop | Deep sub-bass, forward mids |
 | EQ Acoustic | Natural room character |
 
-### Option 2 — Advanced DSP web interface (`--with-eq`)
+All 13 presets installed for everyone — no extra flag needed. Find them in myMPD under **Scripts**.
 
-Install with `--with-eq` and open `http://squarepi.local:8081` for full real-time DSP control.
-
-![SquarePi DSP Control Interface](docs/images/EQ_UI.png)
-
-#### GAIN & BALANCE
-
-- **Analog Gain** — hardware output level trim (0 to −15.5 dB in 0.5 dB steps)
-- **Balance** — continuous L/R pan, centre to ±100% per channel
-
-#### EQUALIZER — 15 Band
-
-- **ON / OFF** — enable or bypass the EQ (bypass passes audio flat through the DSP)
-- **13 presets** — Flat · Bass · Treble · Vocal · Night · Late Night · Rock · Pop · Jazz · Classical · Club · Hip-Hop · Acoustic
-- **Custom preset** — dial in your own curve, name it, and save it for later
-- **Frequency response graph** — live smooth curve with dB grid, frequency labels, and colour-coded fill (amber = boost, blue = cut)
-- **15 fader sliders** — 20 Hz to 16 kHz, ±15 dB per band, real-time DSP update on every move
+### 15 EQ Bands
 
 | Band | Freq | Band | Freq | Band | Freq |
 |---|---|---|---|---|---|
@@ -311,191 +98,327 @@ Install with `--with-eq` and open `http://squarepi.local:8081` for full real-tim
 | 4 | 80 Hz | 9 | 800 Hz | 14 | 8 kHz |
 | 5 | 125 Hz | 10 | 1.25 kHz | 15 | 16 kHz |
 
-#### MIXER
+Range: ±15 dB per band. Hardware DSP — the Pi CPU is not involved.
 
-| Mode | Description |
-|---|---|
-| Stereo | Normal L/R output |
-| Mono | Both channels carry a mono mix |
-| Left Only | Left channel signal on both outputs |
-| Right Only | Right channel signal on both outputs |
-| Custom | Full L/R crossfeed matrix with per-path dB control |
+### Visual DSP Interface (`--with-eq`)
 
-#### SYSTEM — real-time fault monitor
+Open `http://squarepi.local:8081` for the full real-time DSP control panel.
+
+![SquarePi DSP Control Interface](docs/images/EQ_UI.png)
+
+- **15 fader sliders** — real-time DSP update on every move
+- **Live frequency response graph** — smooth curve with dB grid, amber = boost, blue = cut
+- **Custom preset** — dial in your own curve and save it
+- **Analog Gain** — hardware output trim (0 to −15.5 dB)
+- **Balance** — continuous L/R pan
+- **Mixer Mode** — Stereo / Mono / Left Only / Right Only / Custom matrix
+- **Save to chip** — settings survive full power cycles via `alsactl store`
+
+Terminal access via `alsamixer` → `F6` → `LouderRaspberry`.
+
+---
+
+## Real-time Fault Monitor
 
 ![SquarePi System Fault Monitor](docs/images/System.png)
 
-Live readout direct from the TAS5805M chip registers:
-
-- **Temperature** — Pi CPU thermal zone, live °C
-- **PVDD** — power rail status (OK / fault)
-- **Faults** — active fault count
-- **Status** — Healthy / Warning / Fault
-
-The fault monitor grid shows 13 individual hardware fault flags from the TAS5805M:
+Live readout from TAS5805M chip registers — available in the DSP UI (`--with-eq`):
 
 | Fault | Meaning |
 |---|---|
 | Left / Right Channel OC | Output overcurrent — speaker short or overload |
-| Left / Right Channel DC | DC fault on output — amp protection triggered |
-| PVDD Undervoltage | Supply voltage too low |
-| PVDD Overvoltage | Supply voltage too high |
-| Clock | I2S clock fault — audio interface issue |
-| OTP CRC Error | Internal chip configuration error |
+| Left / Right Channel DC | DC fault — amp protection triggered |
+| PVDD Undervoltage / Overvoltage | Supply voltage out of range |
+| Clock | I2S clock fault |
 | Over Temperature Shutdown | Chip too hot, output disabled |
 | Warning 112°C / 122°C / 134°C / 146°C | Thermal warning thresholds |
 
-Green dot = clear. Red = active fault. All faults self-clear when the condition resolves.
-
-#### Save to chip
-
-The **Save to chip** button writes the current EQ and gain settings via `alsactl store` — settings survive a full power cycle. EQ state is also auto-saved when the service stops cleanly (reboot or shutdown).
-
-### Option 3 — Terminal access (alsamixer)
-
-The 15-band EQ is directly accessible from the terminal without the web UI:
-
-```bash
-alsamixer
-```
-
-![SquarePi AlsaMixer EQ](docs/images/squarepi-alsamixer-eq.png)
-
-Press `F6` to select the SquarePi card (`LouderRaspberry`). Use arrow keys to navigate bands, up/down to adjust.
-
-To save changes so they survive a reboot:
-
-```bash
-sudo alsactl store
-```
+Green = clear. Red = active. All faults self-clear when the condition resolves.
 
 ---
 
-## Bluetooth A2DP (`--with-bt`)
+## Control & UI
 
-After reboot:
+| Interface | Address | Notes |
+|---|---|---|
+| myMPD web UI | `http://squarepi.local:8080` | Mobile-optimised, always installed |
+| SquarePi EQ™ | `http://squarepi.local:8081` | With `--with-eq` |
+| MPD (music apps) | `squarepi.local:6600` | Auto-discovered by M.A.L.P, MPDroid, Cantata |
+| DLNA renderer | Appears as `SquarePi` in DLNA apps | With `--with-dlna` |
 
-1. Open Bluetooth on your phone or tablet
-2. Scan for devices — **SquarePi** will appear
-3. Tap pair — no PIN required
-4. Play audio — it routes directly to SquarePi
+No IP address needed. Everything reachable by name on any network.
 
-MPD and Bluetooth share the ALSA output via a software mixer — both can play simultaneously without pausing either.
+### Sleep Timer
 
-**Notes:**
-- Codec: SBC (AAC is not available in the Raspberry Pi OS `bluez-alsa-utils` package)
-- Bluetooth adapter is unblocked via `rfkill` on every boot
-- Adapter stays discoverable and pairable after every reboot via `squarepi-bt-setup.service`
-
-### Troubleshooting Bluetooth
-
-Check adapter status:
-
-```bash
-rfkill list
-sudo rfkill unblock bluetooth
-sudo bluetoothctl show
-```
-
-Check services:
-
-```bash
-systemctl status bluealsa
-systemctl status squarepi-bt-agent
-```
-
-If pairing fails with `Authentication Failed`, remove the old pairing on both sides and pair again.
-
-On the Pi:
-
-```bash
-sudo bluetoothctl
-power on
-pairable on
-discoverable on
-devices
-remove <MAC-address>
-scan on
-```
-
-Then restart and try again:
-
-```bash
-sudo systemctl restart bluetooth squarepi-bt-agent squarepi-bt-setup
-```
-
----
-
-## DLNA renderer (`--with-dlna`)
-
-After reboot, SquarePi appears as a **DLNA / UPnP renderer** named `SquarePi` in any compatible app — BubbleUPnP, Kodi, VLC, Windows Media Player, and most smart TV remotes.
-
-Select SquarePi as the playback device in your app and start streaming.
-
----
-
-## Spotify Connect (`--with-spotify`)
-
-After reboot, SquarePi appears as a speaker in the **Spotify app** under Devices.
-
-1. Open Spotify on your phone, tablet, or desktop
-2. Tap the **Devices** icon → select **SquarePi**
-3. Playback routes to SquarePi immediately
-
-**Notes:**
-- Requires Spotify Premium
-- Automatically pauses MPD when Spotify starts playing
-- Bitrate: 320 kbps
-
-### Troubleshooting Spotify Connect
-
-```bash
-systemctl status raspotify
-journalctl -u raspotify -n 30
-```
-
----
-
-## AirPlay (`--with-airplay`)
-
-After reboot, SquarePi appears as an **AirPlay** speaker on your local network.
-
-1. On iPhone, iPad, or Mac — swipe for Control Centre
-2. Tap **AirPlay** → select **SquarePi**
-3. Audio streams directly to SquarePi
-
-**Notes:**
-- Works with any AirPlay-compatible app (Apple Music, Spotify, VLC, etc.)
-- Automatically pauses MPD when AirPlay session starts
-- No Apple account or subscription required
-
-### Troubleshooting AirPlay
-
-```bash
-systemctl status shairport-sync
-journalctl -u shairport-sync -n 30
-```
-
----
-
-## Sleep timer
-
-Sleep timer scripts are installed for everyone — no extra flag needed. Find them in myMPD under **Scripts**:
+Built into every install — find in myMPD → **Scripts**:
 
 | Script | Action |
 |---|---|
 | Sleep_30min | Stop playback after 30 minutes |
 | Sleep_60min | Stop playback after 60 minutes |
 | Sleep_90min | Stop playback after 90 minutes |
-| Sleep_Cancel | Cancel a running sleep timer |
-
-Setting a new timer automatically cancels the previous one.
+| Sleep_Cancel | Cancel a running timer |
 
 ---
 
-## Adding music
+## Setup
 
-Default MPD library path is `/var/lib/mpd/music`:
+### Requirements
+
+- Raspberry Pi (Zero 2W · 3B+ · 4B · Pi 5 in development)
+- Raspberry Pi OS Lite — Bookworm (Debian 12) or Trixie (Debian 13)
+- SquarePi HAT connected
+- Internet connection on the Pi
+- SSH or local terminal
+
+### One-command full install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --all
+```
+
+### Install specific features
+
+```bash
+# Base: MPD + myMPD + EQ presets + sleep timer
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash
+
+# Add Bluetooth A2DP
+... | sudo bash -s -- --with-bt
+
+# Add SquarePi EQ™ visual DSP interface
+... | sudo bash -s -- --with-eq
+
+# Add DLNA/UPnP renderer
+... | sudo bash -s -- --with-dlna
+
+# Add Spotify Connect
+... | sudo bash -s -- --with-spotify
+
+# Add AirPlay
+... | sudo bash -s -- --with-airplay
+
+# Everything
+... | sudo bash -s -- --all
+```
+
+### Clone and run locally
+
+```bash
+git clone https://github.com/sijah/Square_PI.git
+cd Square_PI/squarepi-installer
+
+sudo bash install.sh --all               # everything
+sudo bash install.sh --with-bt --with-eq # Bluetooth + DSP UI only
+```
+
+### Optional: auto-reboot and custom hostname
+
+```bash
+sudo SQUAREPI_HOSTNAME=squarepi SQUAREPI_AUTO_REBOOT=1 bash install.sh --all
+```
+
+### After install
+
+```bash
+sudo reboot
+```
+
+Verify audio card loaded:
+
+```bash
+aplay -l    # should show LouderRaspberry
+```
+
+Open myMPD: `http://squarepi.local:8080`
+
+> **First boot defaults:** Volume at 25%. SquarePi EQ™ initialised to flat (all bands 0 dB).
+
+[Full setup guide with OS flashing, first boot, and troubleshooting →](docs/setup.md)
+
+---
+
+## SquarePi vs Commercial Alternatives
+
+| | **SquarePi** | Sonos Era 100 | Amazon Echo Studio |
+|---|---|---|---|
+| Price | **< $30 parts** | $249 | $199 |
+| Cloud required | **Never** | Always | Always |
+| Account required | **None** | Yes | Yes |
+| Data collection | **None** | Yes | Yes |
+| Subscription | **None** | Some features | Some features |
+| Protocols | **BT · DLNA · Spotify · AirPlay · USB · Radio** | Limited | Limited |
+| EQ | **SquarePi EQ™ 15-band hardware DSP** | App-only, limited | App-only, limited |
+| Upscaling | **SquarePi Upscaler™ 48kHz/24-bit** | None | None |
+| Open source | **Fully** | No | No |
+| Hackable | **Fork it, own it** | No | No |
+| Setup | **One command** | App + account | App + account |
+
+---
+
+## Who It's For
+
+- **Makers and hobbyists** — open hardware, open software, real specs
+- **Non-technical families** — one command install, zero cloud, works on any phone
+- **DIY audio community** — KiCad files, full BOM, JLCPCB-ready Gerbers in Releases
+- **Privacy-conscious users** — no cloud, no account, no data collection, ever
+- **Anyone tired of subscriptions** — music you control, on hardware you own
+
+---
+
+## Hardware
+
+### Core Specifications
+
+| Parameter | Value |
+|---|---|
+| Amplifier chip | Texas Instruments TAS5805M |
+| Output power | 2×30W into 4Ω at 24V · 2×23W into 8Ω at 24V · 2×13W into 4Ω at 12V |
+| Audio input | I2S digital from Raspberry Pi GPIO |
+| DSP | Onboard TAS5805M — 15-band EQ, 3-band DRC, gain control, all via I²C |
+| Supply | 12–24V DC, barrel jack |
+| 5V rail | XL1509-5.0 buck converter (powers Pi too — no separate Pi power supply) |
+| Form factor | Standard 40-pin RPi HAT, 65×61mm, 2-layer PCB |
+| Outputs | Screw terminals: LP LN RN RP |
+| Extras | IR receiver footprint, HAT EEPROM (auto Pi recognition) |
+
+### DSP Technical Specs
+
+| Parameter | Value |
+|---|---|
+| THD+N | ≤ 0.03% at 1W, 1kHz |
+| SNR | ≥ 107 dB (A-weighted) |
+| Dynamic range | 106 dB (A-weighted) |
+| Crosstalk | −100 dB at 1kHz |
+| Parametric EQ | 15 bands per channel, full biquad |
+| DRC | 3-band, 4th-order |
+| Volume range | +24 dB to −103 dB, 0.5 dB steps |
+| Sample rates | 32 / 44.1 / 48 / 88.2 / 96 kHz |
+
+### Power Wiring
+
+| Supply | Min current | Output |
+|---|---|---|
+| 12V | 3A | ~13W/ch into 4Ω |
+| 19V | 3A | ~20W/ch into 8Ω |
+| 24V | 3A | ~23W/ch into 8Ω |
+
+> Check polarity before powering on. Use passive 4–8Ω speakers only. Never connect speakers while powered.
+
+### Speaker Terminals
+
+| Terminal | Connection |
+|---|---|
+| `LP` | Left + |
+| `LN` | Left − |
+| `RN` | Right − |
+| `RP` | Right + |
+
+### Thermal
+
+Designed for heatsink-less operation. For long-term reliability:
+
+- Use **12V with 8Ω speakers** for cool continuous operation
+- Avoid sustained high-volume with 4Ω speakers above 12V
+- TAS5805M includes automatic thermal foldback — reduces output at high temperature, recovers automatically
+
+### Design Files
+
+Hardware designed in **KiCad**. PCB fabricated at **JLCPCB**.
+
+- Gerbers, BOM, KiCad project: [GitHub Releases](https://github.com/sijah/Square_PI/releases)
+- Driver: [sonocotta/tas5805m-driver-for-raspbian](https://github.com/sonocotta/tas5805m-driver-for-raspbian)
+
+---
+
+## Raspberry Pi Compatibility
+
+| Model | Status |
+|---|---|
+| Pi Zero 2W | Primary target — tested, recommended |
+| Pi 3B+ | Tested |
+| Pi 4B | Tested |
+| Pi 5 | In development |
+
+---
+
+## What Gets Installed
+
+<details>
+<summary>Always installed (base)</summary>
+
+| Component | Purpose |
+|---|---|
+| `tas58xx` kernel driver | I2S/I2C amplifier driver |
+| Boot overlay | Enables I2S, loads SquarePi audio overlay |
+| `mpd` | Music Player Daemon |
+| `mpc` | MPD command-line client |
+| `alsa-utils` | `aplay`, `alsamixer`, `speaker-test` |
+| `mympd` | Mobile-friendly web UI |
+| `avahi-daemon` | mDNS — `squarepi.local` on any network |
+| `exfatprogs` | exFAT USB drive support |
+| EQ preset Lua scripts | 13 one-tap presets in myMPD Scripts |
+| Sleep timer Lua scripts | 30 / 60 / 90 min + Cancel in myMPD Scripts |
+| `squarepi-eq-init.service` | Sets EQ flat on first boot, then disables itself |
+
+</details>
+
+<details>
+<summary>With --with-bt</summary>
+
+| Component | Purpose |
+|---|---|
+| `bluez` + `bluez-tools` | Bluetooth stack |
+| `bluez-alsa-utils` | BlueALSA, routes BT audio to ALSA |
+| `squarepi-bt-agent` | Auto-accept pairing, no PIN |
+| `squarepi-bt-setup.service` | Keeps adapter discoverable and pairable after every reboot |
+| `/etc/asound.conf` dmix | SquarePi Mixer™ — shared output for BT + MPD simultaneously |
+
+</details>
+
+<details>
+<summary>With --with-eq</summary>
+
+| Component | Purpose |
+|---|---|
+| `squarepi-eq-server.py` | DSP web UI on port 8081 |
+| `squarepi-eq.service` | Systemd unit, starts after sound target |
+| `squarepi-alsa-restore.service` | Restores saved EQ state at every boot |
+
+</details>
+
+<details>
+<summary>With --with-dlna</summary>
+
+| Component | Purpose |
+|---|---|
+| `upmpdcli` | UPnP/DLNA renderer, bridges MPD to DLNA |
+
+</details>
+
+<details>
+<summary>With --with-spotify</summary>
+
+| Component | Purpose |
+|---|---|
+| `raspotify` | Spotify Connect daemon |
+
+</details>
+
+<details>
+<summary>With --with-airplay</summary>
+
+| Component | Purpose |
+|---|---|
+| `shairport-sync` | AirPlay receiver |
+
+</details>
+
+---
+
+## Adding Music
+
+Default MPD library: `/var/lib/mpd/music`
 
 ```bash
 sudo cp -r /path/to/music/* /var/lib/mpd/music/
@@ -503,180 +426,95 @@ sudo chown -R mpd:audio /var/lib/mpd/music
 mpc update
 ```
 
-Internet radio streams can be added from myMPD under **Browse > Webradio**.
+Internet radio: add streams in myMPD → **Browse > Webradio**.
+
+USB drive: see [docs/setup.md](docs/setup.md) for full mount instructions.
 
 ---
 
-## Mount a USB flash drive
-
-The installer creates `/mnt/usb-music` as a standard mount point. USB drives are not auto-mounted — Raspberry Pi OS Bookworm/Trixie does not ship a reliable `usbmount` package. The steps below are the most reliable approach.
-
-### 1. Plug in the drive and find it
+## Branding / White-label Options
 
 ```bash
-lsblk -f
+sudo SQUAREPI_HOSTNAME=myplayer \
+     SQUAREPI_BT_NAME="Living Room" \
+     SQUAREPI_BRAND_NAME="MyPlayer" \
+     bash install.sh --all
 ```
-
-Look for a removable partition such as `/dev/sda1`. Note its filesystem type and UUID.
-
-### 2. Create the mount point
-
-```bash
-sudo mkdir -p /mnt/usb-music
-```
-
-(The installer does this automatically — skip if it already exists.)
-
-### 3. Mount for testing
-
-FAT32 or exFAT (`exfatprogs` is installed automatically by the SquarePi installer):
-
-```bash
-sudo mount -o uid=mpd,gid=audio,umask=0022 /dev/sda1 /mnt/usb-music
-```
-
-ext4:
-
-```bash
-sudo mount /dev/sda1 /mnt/usb-music
-sudo chown -R mpd:audio /mnt/usb-music
-```
-
-Check that the files are visible:
-
-```bash
-ls /mnt/usb-music
-```
-
-### 4. Make it persistent — edit `/etc/fstab`
-
-Get the UUID:
-
-```bash
-sudo blkid /dev/sda1
-```
-
-Open fstab:
-
-```bash
-sudo nano /etc/fstab
-```
-
-Add one line (replace `YOUR-UUID` with the real UUID):
-
-```fstab
-# FAT32
-UUID=YOUR-UUID /mnt/usb-music vfat defaults,nofail,uid=mpd,gid=audio,umask=0022,x-systemd.automount 0 0
-
-# exFAT
-UUID=YOUR-UUID /mnt/usb-music exfat defaults,nofail,uid=mpd,gid=audio,umask=0022,x-systemd.automount 0 0
-
-# ext4
-UUID=YOUR-UUID /mnt/usb-music ext4 defaults,nofail,x-systemd.automount 0 2
-```
-
-Test the fstab entry:
-
-```bash
-sudo systemctl daemon-reload
-sudo mount -a
-findmnt /mnt/usb-music
-```
-
-### 5. Point MPD to the drive
-
-Open the MPD config:
-
-```bash
-sudo nano /etc/mpd.conf
-```
-
-Set:
-
-```conf
-music_directory "/mnt/usb-music"
-```
-
-Restart MPD and rescan:
-
-```bash
-sudo systemctl restart mpd
-mpc update
-```
-
----
-
-## Installer behaviour
-
-The installer (v1.1.0):
-
-- Auto-detects the TAS5805M I2C address (`0x2c`–`0x2f` on buses 1 and 2)
-- Updates the apt package index but does not do a full OS upgrade
-- Backs up the Pi boot config before editing it
-- Enables I2S in `/boot/firmware/config.txt` or `/boot/config.txt`
-- Disables onboard Pi audio to avoid I2S conflicts
-- Disables `w1-gpio` if present (can conflict with GPIO4)
-- Adds `dtoverlay=tas58xx,i2creg=<address>` without `pdn_gpio`
-- Configures MPD to run as user `mpd` with software volume mixer
-- Sets MPD audio output to `plughw:LouderRaspberry,0`
-- Sets initial MPD volume to **25%** (safe default — adjust to taste in myMPD)
-- Installs a first-boot service that initialises all EQ bands to **0 dB (flat)** on the first reboot, then disables itself
-- Triggers an initial MPD database scan
-- Checks that myMPD responds on port `8080`
-- Writes install metadata to `/etc/squarepi-release`
-
-Optional flags add their own steps:
-
-| Flag | What it installs |
-|---|---|
-| `--with-bt` | Bluetooth A2DP stack, auto-pairing agent, MPD source manager |
-| `--with-eq` | DSP web UI on port 8081, ALSA state restore service |
-| `--with-dlna` | upmpdcli DLNA/UPnP renderer |
-
-All flags can be combined freely.
-
----
-
-## Hardware defaults
-
-| Setting | Value |
-|---|---|
-| TAS5805M I2C address | Auto-detected, fallback `0x2c` |
-| PDN GPIO | Not set — SquarePi v1 pulls PDN high in hardware |
-| MPD music directory | `/var/lib/mpd/music` |
-| MPD audio device | `plughw:LouderRaspberry,0` |
-| MPD volume (initial) | 25% |
-| MPD volume control | Software mixer |
-| myMPD port | `8080` |
-| DSP UI port | `8081` |
-| Device name (Bluetooth) | `SquarePi` |
-| Bluetooth codec | SBC |
-| Release metadata | `/etc/squarepi-release` |
-
-### Branding options
 
 | Variable | Purpose |
 |---|---|
-| `SQUAREPI_HOSTNAME` | Sets the Pi hostname |
-| `SQUAREPI_BT_NAME` | Device name for Bluetooth |
-| `SQUAREPI_BRAND_NAME` | Name shown in banners |
+| `SQUAREPI_HOSTNAME` | Pi hostname |
+| `SQUAREPI_BT_NAME` | Bluetooth device name |
+| `SQUAREPI_BRAND_NAME` | Name in installer banners |
 | `SQUAREPI_TAGLINE` | Tagline in installer banner |
-| `SQUAREPI_PROJECT_URL` | Docs URL in final summary |
-| `SQUAREPI_SUPPORT_URL` | Support URL in final summary |
-
-Example:
-
-```bash
-sudo SQUAREPI_HOSTNAME=squarepi SQUAREPI_BT_NAME="Living Room" bash install.sh --with-bt --with-eq
-```
+| `SQUAREPI_AUTO_REBOOT` | Set `1` to reboot automatically after install |
 
 ---
 
 ## Troubleshooting
 
-### Pi does not boot after install
+<details>
+<summary>Audio card not found</summary>
 
-Mount the boot partition on another computer and comment out the SquarePi lines in `config.txt`:
+```bash
+aplay -l
+dmesg | grep -i tas58
+lsmod | grep tas
+```
+
+</details>
+
+<details>
+<summary>MPD not working</summary>
+
+```bash
+sudo systemctl status mpd
+journalctl -u mpd -n 50
+mpc status
+```
+
+If ALSA card name differs from `LouderRaspberry`, update `/etc/mpd.conf`:
+
+```conf
+device "plughw:<card-name>,0"
+```
+
+</details>
+
+<details>
+<summary>DSP UI not loading</summary>
+
+```bash
+systemctl status squarepi-eq
+journalctl -u squarepi-eq -n 30
+curl http://127.0.0.1:8081
+```
+
+</details>
+
+<details>
+<summary>Bluetooth not visible</summary>
+
+```bash
+rfkill list
+sudo rfkill unblock bluetooth
+sudo systemctl restart bluetooth squarepi-bt-agent squarepi-bt-setup
+```
+
+If pairing fails with `Authentication Failed`, remove old pairing:
+
+```bash
+sudo bluetoothctl
+remove <MAC-address>
+scan on
+```
+
+</details>
+
+<details>
+<summary>Pi does not boot after install</summary>
+
+Mount boot partition on another computer and comment out SquarePi lines in `config.txt`:
 
 ```conf
 # dtparam=i2s=on
@@ -685,37 +523,20 @@ Mount the boot partition on another computer and comment out the SquarePi lines 
 
 A timestamped backup is created automatically: `config.txt.squarepi.bak.YYYYMMDDHHMMSS`
 
-### Audio card not found
+</details>
+
+<details>
+<summary>myMPD not reachable</summary>
 
 ```bash
-aplay -l
-dmesg | grep -i tas58
-lsmod | grep tas
+sudo systemctl status mympd
+curl -fs http://127.0.0.1:8080
 ```
 
-### MPD not working
+</details>
 
-```bash
-sudo systemctl status mpd
-journalctl -u mpd -n 50
-mpc status
-```
-
-If the ALSA card name differs from `LouderRaspberry`, update `/etc/mpd.conf`:
-
-```conf
-device "plughw:<card-name>,0"
-```
-
-### DSP UI not loading
-
-```bash
-systemctl status squarepi-eq
-journalctl -u squarepi-eq -n 30
-curl http://127.0.0.1:8081
-```
-
-### USB drive not visible in MPD
+<details>
+<summary>USB drive not visible in MPD</summary>
 
 ```bash
 lsblk -f
@@ -723,22 +544,10 @@ findmnt /mnt/usb-music
 sudo -u mpd ls /mnt/usb-music
 ```
 
-Common fixes: use `/dev/sda1` not `/dev/sda`, use UUID in fstab, include `uid=mpd,gid=audio` for FAT/exFAT, run `mpc update` after mounting.
+Use UUID in `/etc/fstab`, include `uid=mpd,gid=audio` for FAT/exFAT, run `mpc update` after mounting.
+See [docs/setup.md](docs/setup.md) for full instructions.
 
-### myMPD not reachable
-
-```bash
-sudo systemctl status mympd
-curl -fs http://127.0.0.1:8080
-```
-
-### Bluetooth not visible
-
-```bash
-rfkill list
-sudo rfkill unblock bluetooth
-sudo systemctl restart bluetooth squarepi-bt-agent squarepi-bt-setup
-```
+</details>
 
 ---
 
@@ -748,38 +557,36 @@ sudo systemctl restart bluetooth squarepi-bt-agent squarepi-bt-setup
 curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/uninstall.sh | sudo bash
 ```
 
-Or from the cloned repo:
-
-```bash
-cd Square_PI/squarepi-installer
-sudo bash uninstall.sh
-```
-
-Removes: SquarePi driver, boot overlay, MPD, myMPD, EQ server, DLNA renderer, and all SquarePi scripts and services. Prompts before removing MPD music data and before rebooting. Music files are not deleted unless you confirm.
+Removes all SquarePi components. Prompts before deleting music data. Music files are not deleted unless confirmed.
 
 ---
 
-## DSP technical specs
+## Documentation
 
-| Parameter | Value |
+| Document | Contents |
 |---|---|
-| THD+N | ≤ 0.03% at 1W, 1kHz |
-| SNR | ≥ 107 dB (A-weighted) |
-| Dynamic range | 106 dB (A-weighted) |
-| Crosstalk | −100 dB at 1kHz |
-| Idle noise | < 40 µVRMS |
-| Parametric EQ | 15 bands per channel, full biquad |
-| DRC | 3-band, 4th-order |
-| Volume range | +24 dB to −103 dB, 0.5 dB steps |
-| Sample rates | 32 / 44.1 / 48 / 88.2 / 96 kHz |
-| Switching frequency | 384 / 480 / 576 / 768 kHz |
+| [docs/audio-engine.md](docs/audio-engine.md) | Deep dive: Upscaler™, Resampler™, Mixer™, EQ™ |
+| [docs/supported-protocols.md](docs/supported-protocols.md) | Setup and usage for all 7 protocols |
+| [docs/setup.md](docs/setup.md) | Full guide: OS flash → HAT → install → first boot → troubleshoot |
+| [ABOUT.md](ABOUT.md) | Full project pitch for press and feature requests |
 
-Driver: [sonocotta/tas5805m-driver-for-raspbian](https://github.com/sonocotta/tas5805m-driver-for-raspbian)
+---
 
-Hardware files (Gerbers, BOM, KiCad): [GitHub Releases](https://github.com/sijah/Square_PI/releases)
+## Contributing
+
+Issues, pull requests, and forks welcome.
+
+- Installer: single self-contained bash script — `squarepi-installer/install.sh`
+- DSP server: plain Python stdlib — `squarepi-installer/eq-server.py`
+- Hardware: KiCad files in [Releases](https://github.com/sijah/Square_PI/releases)
+- No build step — clone, edit, test on Pi
 
 ---
 
 ## License
 
-MIT
+MIT — do what you want. Attribution appreciated.
+
+---
+
+*From square wave to every corner.* — [Sijah AK](https://github.com/sijah)
