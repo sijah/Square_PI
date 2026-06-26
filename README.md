@@ -3,7 +3,7 @@
 [![Version](https://img.shields.io/badge/installer-v1.3.3-blue)](https://github.com/sijah/Square_PI/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.com)
-[![Hardware](https://img.shields.io/badge/hardware-TAS5805M-orange)](docs/audio-engine.md)
+[![Hardware](https://img.shields.io/badge/hardware-SquarePi-orange)](docs/audio-engine.md)
 [![Stars](https://img.shields.io/github/stars/sijah/Square_PI?style=social)](https://github.com/sijah/Square_PI)
 
 **A Raspberry Pi HAT that turns any Pi into a 2×30W hi-fi wireless speaker system.**
