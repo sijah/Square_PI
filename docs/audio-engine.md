@@ -145,6 +145,44 @@ pcm.!default squarepi_mix
 
 All audio applications — MPD, BlueALSA (Bluetooth), upmpdcli (DLNA), shairport-sync (AirPlay) — write to `squarepi_mix`. The dmix layer sums all streams in real time and feeds a single stream to the hardware.
 
+### Bluetooth audio path
+
+Bluetooth has an extra stage before the mixer — a softvol PCM that provides independent volume control for the BT path:
+
+```
+Phone (A2DP)
+    │
+    ▼
+bluealsa daemon ── AVRCP volume applied to PCM samples (--a2dp-volume)
+    │
+    ▼
+squarepi_bt_vol ── ALSA softvol (BT Volume control, −40 dB to 0 dB)
+    │
+    ▼
+squarepi_mix ───── shared dmix (same as all other sources)
+```
+
+**AVRCP volume** — when a phone supports AVRCP absolute volume, the bluealsa daemon intercepts the volume command and applies a gain directly to the decoded PCM samples before they reach squarepi_bt_vol. The Pi receives quieter or louder samples; no ALSA control changes.
+
+**BT Volume softvol** — the `squarepi_bt_vol` PCM is an ALSA softvol device sitting between bluealsa-aplay and dmix. It exposes a `BT Volume` mixer control (numid=40 on LouderRaspberry, range 0–99, −40 dB to 0 dB). The EQ UI slider maps 0–100% to this range.
+
+| EQ UI % | ALSA val | dB |
+|---|---|---|
+| 0% | 0 | −40.0 dB |
+| 25% | 25 | −29.9 dB |
+| 50% | 50 | −19.8 dB |
+| 75% | 74 | −10.1 dB |
+| 100% | 99 | 0.0 dB |
+
+Default is **50%** (−20 dB). The value is persisted to `/var/lib/squarepi/bt_volume` and restored within 1 second of each BT audio start — including after reboots and mid-session reconnects.
+
+**`BT Volume` control lifetime** — the softvol control only exists while `squarepi_bt_vol` PCM is open (i.e. while BT audio is actively playing). It is not present in `amixer` output when no BT device is streaming. Use `cget`/`cset`, not `sget`/`sset`:
+
+```bash
+amixer -c LouderRaspberry cget "name=BT Volume"
+amixer -c LouderRaspberry cset "name=BT Volume" 50
+```
+
 ### Multiple simultaneous sources
 
 The dmix layer supports many simultaneous writers. Multiple Bluetooth devices, MPD clients, DLNA, and AirPlay can all produce audio at the same time without interrupting each other.

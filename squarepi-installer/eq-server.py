@@ -12,6 +12,8 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+EQ_SERVER_VER = "1.3.4"
+
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
 BT_VOL_FILE = "/var/lib/squarepi/bt_volume"
@@ -210,7 +212,7 @@ def _bt_vol_load_saved():
         with open(BT_VOL_FILE) as f:
             return max(0, min(100, int(f.read().strip())))
     except Exception:
-        return 25
+        return 50
 
 
 def _bt_vol_save(pct):
@@ -224,11 +226,13 @@ def _bt_vol_save(pct):
 
 def get_bt_volume():
     """Read BT Volume softvol as 0-100 percentage. Falls back to saved file value."""
-    out = _run(["amixer", "-c", CARD, "sget", BT_VOL_CONTROL])
+    out = _run(["amixer", "-c", CARD, "cget", "name=" + BT_VOL_CONTROL])
     for line in out.splitlines():
-        if "[" in line and "%" in line:
+        line = line.strip()
+        if line.startswith(": values="):
             try:
-                return int(line.split("[")[1].split("%")[0])
+                val = int(line.split("=", 1)[1].split(",")[0])
+                return round(val * 100 / 99)
             except (ValueError, IndexError):
                 pass
     return _bt_vol_load_saved()
@@ -237,26 +241,31 @@ def get_bt_volume():
 def set_bt_volume(pct):
     """Set BT Volume softvol (0-100 percent) and persist to file."""
     pct = max(0, min(100, int(pct)))
+    val = round(pct * 99 / 100)
     subprocess.run(
-        ["amixer", "-c", CARD, "sset", BT_VOL_CONTROL, str(pct) + "%"],
+        ["amixer", "-c", CARD, "cset", "name=" + BT_VOL_CONTROL, str(val)],
         stderr=subprocess.DEVNULL
     )
     _bt_vol_save(pct)
 
 
 def _bt_vol_restore_thread():
-    """On startup, wait for the softvol control to exist then apply the saved value.
-    The control only exists after bluealsa-aplay opens the squarepi_bt_vol PCM."""
-    target = _bt_vol_load_saved()
+    """Continuously monitor the softvol control. Each time audio starts (control
+    appears after being absent), apply the saved value. Runs for the lifetime of
+    the process so every BT reconnect gets the correct volume."""
+    was_present = False
     while True:
-        time.sleep(5)
-        out = _run(["amixer", "-c", CARD, "sget", BT_VOL_CONTROL])
-        if "[" in out and "%" in out:
+        time.sleep(1)
+        out = _run(["amixer", "-c", CARD, "cget", "name=" + BT_VOL_CONTROL])
+        is_present = ": values=" in out
+        if is_present and not was_present:
+            target = _bt_vol_load_saved()
+            val = round(target * 99 / 100)
             subprocess.run(
-                ["amixer", "-c", CARD, "sset", BT_VOL_CONTROL, str(target) + "%"],
+                ["amixer", "-c", CARD, "cset", "name=" + BT_VOL_CONTROL, str(val)],
                 stderr=subprocess.DEVNULL
             )
-            break
+        was_present = is_present
 
 
 def get_state():
@@ -473,7 +482,7 @@ HTML = r"""<!DOCTYPE html>
     </svg>
     <div>
       <div class="brand-name">SQUARE PI</div>
-      <div class="brand-sub">DSP Control Interface</div>
+      <div class="brand-sub">DSP Control Interface &nbsp;&#x25AA;&nbsp; v__EQ_VER__</div>
     </div>
   </div>
   <div class="topbar-center"></div>
@@ -725,6 +734,7 @@ HTML = r"""<!DOCTYPE html>
 </div><!-- .content -->
 
 </div><!-- .columns -->
+
 </div><!-- .app -->
 
 <script>
@@ -1194,7 +1204,8 @@ class Handler(BaseHTTPRequestHandler):
             ])
             page = (HTML
                     .replace("__BAND_LABELS__", band_labels)
-                    .replace("__FAULT_DEFS__",  fault_defs))
+                    .replace("__FAULT_DEFS__",  fault_defs)
+                    .replace("__EQ_VER__",       EQ_SERVER_VER))
             self._html(page)
 
         elif p == "/api/state":

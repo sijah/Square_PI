@@ -4,14 +4,25 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.3.4] — 2026-06-26
+
+### Fixed
+- **BT Volume slider now works** — amixer calls corrected from `sget`/`sset` (simple interface, not supported by softvol) to `cget`/`cset`. Moving the slider in the EQ UI now actually changes Bluetooth audio volume.
+- **Removed `--volume=mixer` from bluealsa-aplay** — this flag caused a startup crash because the softvol ALSA control only exists while audio is playing, so the service failed to launch cleanly.
+- **Blast protection on every reconnect** — the restore thread now runs for the lifetime of the process (not just once at startup). Every time a phone reconnects or audio restarts, the saved volume is applied within 1 second.
+- Default BT volume raised from 25% (−30 dB, barely audible) to **50%** (−20 dB, comfortable level).
+
+### Added
+- EQ server version displayed in the top-left header of the EQ UI.
+
+---
+
 ## [1.3.3] — 2026-06-26
 
 ### Added
 - **Bluetooth AVRCP volume control** — bluealsa daemon now runs with `--a2dp-volume --initial-volume=25`. Phones that support AVRCP absolute volume (most Android and iOS devices) can control the output level directly from their volume slider.
 - **BT Volume softvol layer** — new `squarepi_bt_vol` ALSA softvol PCM sits between bluealsa-aplay and dmix. Provides independent volume control for the Bluetooth audio path without affecting MPD or other sources.
-- **BT Volume slider in EQ UI** — Gain & Balance section now includes a BT Volume slider (0–100%). Polls every 3 seconds to reflect live AVRCP volume changes. For phones without AVRCP support the slider is the manual control; for AVRCP phones it mirrors the phone's volume slider.
-- **bluealsa-aplay** updated to route through `squarepi_bt_vol` with `--volume=mixer`, wiring AVRCP volume events to the softvol ALSA control.
-- Default BT volume set to **25%** on install and persisted via `alsactl store`.
+- **BT Volume slider in EQ UI** — Gain & Balance section now includes a BT Volume slider (0–100%). Default 50%. Slider persists across reboots and reconnects via `/var/lib/squarepi/bt_volume`.
 
 ### Fixed
 - Phones without AVRCP absolute volume (e.g. Xiaomi HyperOS) no longer connect at full amplitude — `--initial-volume=25` caps the starting level regardless of phone model.

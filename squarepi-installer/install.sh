@@ -57,7 +57,7 @@ done
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.3.3"
+INSTALLER_VER="1.3.4"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -783,7 +783,7 @@ mkdir -p /etc/systemd/system/bluealsa-aplay.service.d
 cat > /etc/systemd/system/bluealsa-aplay.service.d/override.conf <<'EOF'
 [Service]
 ExecStart=
-ExecStart=/usr/bin/bluealsa-aplay -S --pcm=squarepi_bt_vol --volume=mixer --mixer-name="BT Volume" --mixer-device=LouderRaspberry
+ExecStart=/usr/bin/bluealsa-aplay -S --pcm=squarepi_bt_vol
 EOF
 
 systemctl daemon-reload
@@ -791,8 +791,8 @@ systemctl enable bluealsa-aplay 2>/dev/null || true
 systemctl restart bluealsa-aplay
 sleep 1
 
-# Initialise BT Volume softvol default (25% — safe level for any phone)
-amixer -c LouderRaspberry sset "BT Volume" 25% 2>/dev/null || true
+# BT Volume default persisted via file; softvol control only exists during BT playback
+[[ -f /var/lib/squarepi/bt_volume ]] || echo "50" > /var/lib/squarepi/bt_volume
 alsactl store 2>/dev/null || true
 
 if systemctl is-active --quiet bluealsa-aplay; then
@@ -1002,7 +1002,7 @@ success "EQ server installed to ${EQ_SERVER_DEST}"
 
 # State directory for eq-server persistence (BT volume saved here)
 mkdir -p /var/lib/squarepi
-[[ -f /var/lib/squarepi/bt_volume ]] || echo "25" > /var/lib/squarepi/bt_volume
+[[ -f /var/lib/squarepi/bt_volume ]] || echo "50" > /var/lib/squarepi/bt_volume
 
 # systemd unit for EQ server
 cat > /etc/systemd/system/squarepi-eq.service <<EOF
