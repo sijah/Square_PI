@@ -57,7 +57,7 @@ done
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.3.2"
+INSTALLER_VER="1.3.3"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -702,7 +702,7 @@ mkdir -p /etc/systemd/system/bluealsa.service.d
 cat > /etc/systemd/system/bluealsa.service.d/override.conf <<EOF
 [Service]
 ExecStart=
-ExecStart=/usr/bin/bluealsa -S -p a2dp-sink
+ExecStart=/usr/bin/bluealsa -S -p a2dp-sink --a2dp-volume --initial-volume=25
 EOF
 
 systemctl daemon-reload
@@ -742,6 +742,18 @@ pcm.squarepi_mix {
     }
 }
 
+pcm.squarepi_bt_vol {
+    type softvol
+    slave.pcm "squarepi_mix"
+    control {
+        name "BT Volume"
+        card LouderRaspberry
+    }
+    min_dB -40.0
+    max_dB 0.0
+    resolution 100
+}
+
 ctl.squarepi_mix {
     type hw
     card LouderRaspberry
@@ -768,7 +780,7 @@ mkdir -p /etc/systemd/system/bluealsa-aplay.service.d
 cat > /etc/systemd/system/bluealsa-aplay.service.d/override.conf <<'EOF'
 [Service]
 ExecStart=
-ExecStart=/usr/bin/bluealsa-aplay --pcm=squarepi_mix
+ExecStart=/usr/bin/bluealsa-aplay -S --pcm=squarepi_bt_vol --volume=mixer --mixer-name="BT Volume" --mixer-device=LouderRaspberry
 EOF
 
 systemctl daemon-reload
@@ -776,8 +788,12 @@ systemctl enable bluealsa-aplay 2>/dev/null || true
 systemctl restart bluealsa-aplay
 sleep 1
 
+# Initialise BT Volume softvol default (25% — safe level for any phone)
+amixer -c LouderRaspberry sset "BT Volume" 25% 2>/dev/null || true
+alsactl store 2>/dev/null || true
+
 if systemctl is-active --quiet bluealsa-aplay; then
-  success "bluealsa-aplay routing active (→ squarepi_mix)"
+  success "bluealsa-aplay routing active (→ squarepi_bt_vol @ 25%)"
 else
   warn "bluealsa-aplay not running yet — it will connect once a BT device pairs"
 fi
@@ -980,6 +996,10 @@ fi
 
 chmod +x "${EQ_SERVER_DEST}"
 success "EQ server installed to ${EQ_SERVER_DEST}"
+
+# State directory for eq-server persistence (BT volume saved here)
+mkdir -p /var/lib/squarepi
+[[ -f /var/lib/squarepi/bt_volume ]] || echo "25" > /var/lib/squarepi/bt_volume
 
 # systemd unit for EQ server
 cat > /etc/systemd/system/squarepi-eq.service <<EOF

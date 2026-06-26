@@ -8,9 +8,13 @@ Port 8081. Pure Python stdlib — no pip dependencies.
 import json
 import os
 import subprocess
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 CARD = "LouderRaspberry"
+BT_VOL_CONTROL = "BT Volume"
+BT_VOL_FILE = "/var/lib/squarepi/bt_volume"
 
 # ── EQ bands ──────────────────────────────────────────────────────────────────
 # (display label, amixer control name)
@@ -200,6 +204,61 @@ def set_balance(balance):
     amixer_set("Channel Right Gain", r_raw)
 
 
+def _bt_vol_load_saved():
+    """Read persisted BT volume from file. Returns 25 if file missing or invalid."""
+    try:
+        with open(BT_VOL_FILE) as f:
+            return max(0, min(100, int(f.read().strip())))
+    except Exception:
+        return 25
+
+
+def _bt_vol_save(pct):
+    try:
+        os.makedirs(os.path.dirname(BT_VOL_FILE), exist_ok=True)
+        with open(BT_VOL_FILE, "w") as f:
+            f.write(str(pct))
+    except Exception:
+        pass
+
+
+def get_bt_volume():
+    """Read BT Volume softvol as 0-100 percentage. Falls back to saved file value."""
+    out = _run(["amixer", "-c", CARD, "sget", BT_VOL_CONTROL])
+    for line in out.splitlines():
+        if "[" in line and "%" in line:
+            try:
+                return int(line.split("[")[1].split("%")[0])
+            except (ValueError, IndexError):
+                pass
+    return _bt_vol_load_saved()
+
+
+def set_bt_volume(pct):
+    """Set BT Volume softvol (0-100 percent) and persist to file."""
+    pct = max(0, min(100, int(pct)))
+    subprocess.run(
+        ["amixer", "-c", CARD, "sset", BT_VOL_CONTROL, str(pct) + "%"],
+        stderr=subprocess.DEVNULL
+    )
+    _bt_vol_save(pct)
+
+
+def _bt_vol_restore_thread():
+    """On startup, wait for the softvol control to exist then apply the saved value.
+    The control only exists after bluealsa-aplay opens the squarepi_bt_vol PCM."""
+    target = _bt_vol_load_saved()
+    while True:
+        time.sleep(5)
+        out = _run(["amixer", "-c", CARD, "sget", BT_VOL_CONTROL])
+        if "[" in out and "%" in out:
+            subprocess.run(
+                ["amixer", "-c", CARD, "sset", BT_VOL_CONTROL, str(target) + "%"],
+                stderr=subprocess.DEVNULL
+            )
+            break
+
+
 def get_state():
     """Return all DSP state in one call."""
     bands = {label: amixer_get(ctrl) for label, ctrl in BANDS}
@@ -207,6 +266,7 @@ def get_state():
         "bands":       bands,
         "gain":        amixer_get_int("Analog Gain"),
         "balance":     get_balance(),
+        "bt_volume":   get_bt_volume(),
         "eq_enabled":  amixer_get_enum("Equalizer") != "Off",
         "mixer_mode":  amixer_get_enum("Mixer Mode") or "Stereo",
         "matrix": {
@@ -487,6 +547,11 @@ HTML = r"""<!DOCTYPE html>
       <span class="ctrl-lbl">Balance</span>
       <input type="range" id="sl-bal" min="-20" max="20" value="0" oninput="onBalance(this.value)">
       <span class="ctrl-val" id="v-bal">Centre</span>
+    </div>
+    <div class="ctrl-row">
+      <span class="ctrl-lbl">BT Volume</span>
+      <input type="range" id="sl-btvol" min="0" max="100" value="25" oninput="onBtVolume(this.value)">
+      <span class="ctrl-val" id="v-btvol">25%</span>
     </div>
   </div>
 </div>
@@ -948,6 +1013,12 @@ function setBalDisplay(v) {
 }
 function onBalance(v) { setBalDisplay(v); post('/api/balance', {value: parseInt(v)}); }
 
+function onBtVolume(v) {
+  v = parseInt(v);
+  document.getElementById('v-btvol').textContent = v + '%';
+  post('/api/bt-volume', {value: v});
+}
+
 // ── Mixer mode ─────────────────────────────────────────────────────────────────
 function setMode(mode) {
   document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -1027,6 +1098,9 @@ function loadState() {
     if (gainSl) { gainSl.value = gv; setGainDisplay(gv); }
     const balSl = document.getElementById('sl-bal');
     if (balSl) { balSl.value = s.balance ?? 0; setBalDisplay(balSl.value); }
+    const btSl = document.getElementById('sl-btvol');
+    const btVol = s.bt_volume ?? 25;
+    if (btSl) { btSl.value = btVol; document.getElementById('v-btvol').textContent = btVol + '%'; }
     setEqBypass(s.eq_enabled !== false);
     setMode(s.mixer_mode ?? 'Stereo');
     if (s.matrix) setMatrixDisplay(s.matrix);
@@ -1064,6 +1138,14 @@ loadCustomPresets();
 setInterval(() => {
   fetch('/api/faults').then(r => r.json()).then(f => { updateFaults(f); updateHealthLed(f); }).catch(() => {});
 }, 10000);
+setInterval(() => {
+  fetch('/api/bt-volume').then(r => r.json()).then(d => {
+    const sl = document.getElementById('sl-btvol');
+    const vl = document.getElementById('v-btvol');
+    if (sl && document.activeElement !== sl) { sl.value = d.volume; }
+    if (vl && document.activeElement !== sl) { vl.textContent = d.volume + '%'; }
+  }).catch(() => {});
+}, 3000);
 window.addEventListener('resize', drawCurve);
 setInterval(loadSysInfo, 8000);
 loadState();
@@ -1127,6 +1209,9 @@ class Handler(BaseHTTPRequestHandler):
         elif p == "/api/custom-presets":
             self._json(CUSTOM_PRESETS)
 
+        elif p == "/api/bt-volume":
+            self._json({"volume": get_bt_volume()})
+
         elif p == "/api/sysinfo":
             temp_c = None
             try:
@@ -1183,6 +1268,11 @@ class Handler(BaseHTTPRequestHandler):
                         amixer_set(ctrl, max(-110, min(0, int(val))))
             self._json({"ok": True})
 
+        elif p == "/api/bt-volume":
+            pct = max(0, min(100, int(data.get("value", 70))))
+            set_bt_volume(pct)
+            self._json({"ok": True})
+
         elif p == "/api/store":
             subprocess.run(["alsactl", "store"], stderr=subprocess.DEVNULL)
             self._json({"ok": True})
@@ -1215,6 +1305,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    threading.Thread(target=_bt_vol_restore_thread, daemon=True).start()
     server = HTTPServer(("0.0.0.0", 8081), Handler)
     print("[SquarePi DSP] Listening on http://0.0.0.0:8081")
     try:
