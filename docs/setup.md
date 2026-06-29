@@ -80,37 +80,40 @@ Accept the host key fingerprint when prompted.
 
 ## Step 4 — Run the installer
 
-### Full install (recommended)
+### Install (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --all
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash
 ```
 
-This installs everything: MPD, myMPD, Bluetooth, DLNA, Spotify Connect, AirPlay, and the visual DSP interface.
+The default install includes **Bluetooth and the visual DSP interface** alongside MPD, myMPD, EQ presets, and the sleep timer. DLNA, Spotify Connect, and AirPlay are opt-in.
 
-### Choose specific features
+### Flags
 
-| Command | What it adds |
+| Command | Effect |
 |---|---|
-| *(no flags)* | MPD + myMPD + EQ presets + sleep timer (base) |
-| `--with-bt` | Bluetooth A2DP |
-| `--with-eq` | Visual DSP interface (EQ, gain, balance, mixer) |
-| `--with-dlna` | DLNA/UPnP renderer |
-| `--with-spotify` | Spotify Connect |
-| `--with-airplay` | AirPlay |
-| `--all` | All five optional features |
+| *(no flags)* | MPD + myMPD + **Bluetooth** + **EQ UI** + presets + sleep timer |
+| `--without-bt` | Skip Bluetooth |
+| `--without-eq` | Skip the EQ web UI (myMPD EQ presets stay) |
+| `--with-dlna` | Add DLNA/UPnP renderer |
+| `--with-spotify` | Add Spotify Connect |
+| `--with-airplay` | Add AirPlay |
+| `--all` | Everything (BT, EQ, DLNA, Spotify, AirPlay) |
 
-Mix and match freely:
+`--with-bt` / `--with-eq` are still accepted as no-op aliases. Mix and match freely:
 ```bash
-... | sudo bash -s -- --with-bt --with-eq --with-spotify
+... | sudo bash -s -- --with-dlna --with-airplay
+... | sudo bash -s -- --without-bt          # EQ UI but no Bluetooth
 ```
+
+If a BlueALSA package isn't available on your OS image, the installer warns and continues without Bluetooth — the core install never aborts.
 
 ### Clone and run locally (alternative)
 
 ```bash
 git clone https://github.com/sijah/Square_PI.git
 cd Square_PI/squarepi-installer
-sudo bash install.sh --all
+sudo bash install.sh
 ```
 
 ### What the installer does
@@ -124,7 +127,7 @@ sudo bash install.sh --all
 7. Writes sleep timer scripts (30/60/90 min + cancel) to myMPD
 8. Sets MPD volume to 25% (safe first-boot default)
 9. Installs a first-boot EQ init service (sets all 15 bands to 0 dB, then disables itself)
-10. Optionally installs Bluetooth, DLNA, Spotify, AirPlay, EQ server
+10. Installs Bluetooth and the EQ server by default; DLNA, Spotify, AirPlay when requested
 11. Verifies myMPD responds on port 8080
 12. Writes install metadata to `/etc/squarepi-release`
 
@@ -179,7 +182,7 @@ http://squarepi.local:8080
 
 If your browser redirects to HTTPS, use `https://squarepi.local:8443` and accept the self-signed certificate. Mobile browsers work — no app required.
 
-### Open the DSP interface (if installed with `--with-eq`)
+### Open the DSP interface (installed by default)
 
 ```
 http://squarepi.local:8081

@@ -5,11 +5,13 @@
 #  Tested on: Raspberry Pi OS Lite (Debian Bookworm / Trixie), RPi Zero 2W
 #
 #  Usage:
-#    sudo bash install.sh              # MPD + myMPD only
-#    sudo bash install.sh --with-bt   # MPD + myMPD + Bluetooth A2DP
-#    sudo SQUAREPI_AUTO_REBOOT=1 bash install.sh --with-bt
+#    sudo bash install.sh                 # MPD + myMPD + Bluetooth + EQ UI (default)
+#    sudo bash install.sh --without-bt    # skip Bluetooth
+#    sudo bash install.sh --without-eq    # skip the EQ web UI
+#    sudo bash install.sh --with-dlna --with-spotify --with-airplay
+#    sudo bash install.sh --all           # everything (BT, EQ, DLNA, Spotify, AirPlay)
 #    sudo SQUAREPI_HOSTNAME=squarepi bash install.sh
-#    sudo SQUAREPI_BT_NAME="Kitchen SquarePi" bash install.sh --with-bt
+#    sudo SQUAREPI_BT_NAME="Kitchen SquarePi" bash install.sh
 # =============================================================================
 
 set -euo pipefail
@@ -37,14 +39,19 @@ box_line() { printf "  ║ %-44.44s ║\n" "$*"; }
 # -----------------------------------------------------------------------------
 # Parse arguments
 # -----------------------------------------------------------------------------
-INSTALL_BT=0
-INSTALL_EQ=0
+# Bluetooth and the EQ web UI are installed by default (the two defining features).
+# DLNA, Spotify, and AirPlay remain opt-in. Use --without-bt / --without-eq to skip.
+INSTALL_BT=1
+INSTALL_EQ=1
 INSTALL_DLNA=0
 INSTALL_SPOTIFY=0
 INSTALL_AIRPLAY=0
 for arg in "$@"; do
+  # --with-bt / --with-eq are kept as no-op aliases for backward compatibility
   [[ "$arg" == "--with-bt"      ]] && INSTALL_BT=1
   [[ "$arg" == "--with-eq"      ]] && INSTALL_EQ=1
+  [[ "$arg" == "--without-bt"   ]] && INSTALL_BT=0
+  [[ "$arg" == "--without-eq"   ]] && INSTALL_EQ=0
   [[ "$arg" == "--with-dlna"    ]] && INSTALL_DLNA=1
   [[ "$arg" == "--with-spotify" ]] && INSTALL_SPOTIFY=1
   [[ "$arg" == "--with-airplay" ]] && INSTALL_AIRPLAY=1
@@ -57,7 +64,7 @@ done
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.3.4"
+INSTALLER_VER="1.4.0"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -659,12 +666,12 @@ chmod 644 "${RELEASE_FILE}"
 success "Release metadata written to ${RELEASE_FILE}"
 
 # =============================================================================
-# BLUETOOTH A2DP SETUP (only if --with-bt passed)
+# BLUETOOTH A2DP SETUP (installed by default; skip with --without-bt)
 # =============================================================================
 if [[ $INSTALL_BT -eq 1 ]]; then
 
 # -----------------------------------------------------------------------------
-# BT-1. Install Bluetooth packages
+# BT-1. Install Bluetooth packages (fail-soft: skip BT, keep core install)
 # -----------------------------------------------------------------------------
 step "[BT] Installing Bluetooth stack"
 
@@ -676,19 +683,23 @@ for pkg in bluez-alsa-utils bluealsa-utils bluealsa; do
   fi
 done
 
-[[ -z "$BLUEALSA_PKG" ]] && error "No BlueALSA package found. Use Raspberry Pi OS Bookworm or enable a repo containing bluez-alsa-utils."
+if [[ -z "$BLUEALSA_PKG" ]]; then
+  warn "No BlueALSA package found — skipping Bluetooth. Core install continues."
+  warn "To add BT later, enable a repo with bluez-alsa-utils and rerun the installer."
+  INSTALL_BT=0
+elif ! apt-get install -y -qq bluez bluez-tools "${BLUEALSA_PKG}" python3-dbus python3-gi; then
+  warn "Bluetooth packages failed to install — skipping Bluetooth. Core install continues."
+  INSTALL_BT=0
+else
+  apt-get install -y -qq bluealsa-aplay 2>/dev/null || \
+    info "bluealsa-aplay bundled in ${BLUEALSA_PKG} — OK"
+  success "Bluetooth packages installed"
+fi
 
-apt-get install -y -qq \
-  bluez \
-  bluez-tools \
-  "${BLUEALSA_PKG}" \
-  python3-dbus \
-  python3-gi
+fi  # end BT package install
 
-apt-get install -y -qq bluealsa-aplay 2>/dev/null || \
-  info "bluealsa-aplay bundled in ${BLUEALSA_PKG} — OK"
-
-success "Bluetooth packages installed"
+# Remaining Bluetooth configuration only runs if packages installed cleanly
+if [[ $INSTALL_BT -eq 1 ]]; then
 
 # -----------------------------------------------------------------------------
 # BT-2. Configure BlueALSA (v4 compatible — SBC only, no AAC)
@@ -792,11 +803,12 @@ systemctl restart bluealsa-aplay
 sleep 1
 
 # BT Volume default persisted via file; softvol control only exists during BT playback
+mkdir -p /var/lib/squarepi
 [[ -f /var/lib/squarepi/bt_volume ]] || echo "50" > /var/lib/squarepi/bt_volume
 alsactl store 2>/dev/null || true
 
 if systemctl is-active --quiet bluealsa-aplay; then
-  success "bluealsa-aplay routing active (→ squarepi_bt_vol @ 25%)"
+  success "bluealsa-aplay routing active (→ squarepi_bt_vol @ 50%)"
 else
   warn "bluealsa-aplay not running yet — it will connect once a BT device pairs"
 fi
@@ -975,7 +987,7 @@ success "Group permissions set"
 fi  # end INSTALL_BT
 
 # =============================================================================
-# ADVANCED EQ WEB SERVER (only if --with-eq passed)
+# ADVANCED EQ WEB SERVER (installed by default; skip with --without-eq)
 # =============================================================================
 if [[ $INSTALL_EQ -eq 1 ]]; then
 

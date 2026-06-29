@@ -1,6 +1,6 @@
 # SquarePi
 
-[![Version](https://img.shields.io/badge/installer-v1.3.4-blue)](https://github.com/sijah/Square_PI/releases)
+[![Version](https://img.shields.io/badge/installer-v1.4.0-blue)](https://github.com/sijah/Square_PI/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.com)
 [![Hardware](https://img.shields.io/badge/hardware-SquarePi-orange)](docs/audio-engine.md)
@@ -24,7 +24,7 @@ One install command sets up the audio driver, music player, web UI, Bluetooth, D
 | Audio quality | **48kHz / 24-bit** — automatic upscaling on all sources |
 | Cost | **Under $30** in parts |
 | Protocols | **7** — BT · DLNA · Spotify · AirPlay · USB · Radio · MPD |
-| Setup | **One command** — `sudo bash install.sh --all` |
+| Setup | **One command** — `sudo bash install.sh` (Bluetooth + EQ UI included) |
 | Control | **Browser UI** — `squarepi.local`, no app install |
 | Cloud | **None** — fully local, no account, no subscription |
 
@@ -98,7 +98,7 @@ All 13 presets are installed by default. Find them in myMPD under **Scripts**.
 
 Range: ±15 dB per band. Runs in the TAS5805M chip — the Pi CPU is not involved.
 
-### Visual DSP Interface (`--with-eq`)
+### Visual DSP Interface (installed by default)
 
 Open `http://squarepi.local:8081` for the full real-time DSP control panel.
 
@@ -120,7 +120,7 @@ Terminal access via `alsamixer` → `F6` → `LouderRaspberry`.
 
 ![SquarePi System Fault Monitor](docs/images/System.png)
 
-Live readout from TAS5805M chip registers — available in the DSP UI (`--with-eq`):
+Live readout from TAS5805M chip registers — available in the DSP UI (installed by default):
 
 | Fault | Meaning |
 |---|---|
@@ -140,7 +140,7 @@ Green = clear. Red = active. All faults self-clear when the condition resolves.
 | Interface | Address | Notes |
 |---|---|---|
 | myMPD web UI | `http://squarepi.local:8080` · `https://squarepi.local:8443` | Mobile-optimised, always installed |
-| EQ DSP UI | `http://squarepi.local:8081` | With `--with-eq` |
+| EQ DSP UI | `http://squarepi.local:8081` | Installed by default (skip with `--without-eq`) |
 | MPD (music apps) | `squarepi.local:6600` | Auto-discovered by M.A.L.P, MPDroid, Cantata |
 | DLNA renderer | Appears as `SquarePi` in DLNA apps | With `--with-dlna` |
 
@@ -169,24 +169,19 @@ Built into every install — find in myMPD → **Scripts**:
 - Internet connection on the Pi
 - SSH or local terminal
 
-### One-command full install
+### One-command install (recommended)
+
+The default install includes **Bluetooth and the EQ web UI** — the two defining features — alongside MPD, myMPD, EQ presets, and the sleep timer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --all
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash
 ```
 
-### Install specific features
+### Add optional protocols
+
+DLNA, Spotify Connect, and AirPlay are opt-in:
 
 ```bash
-# Base: MPD + myMPD + EQ presets + sleep timer
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash
-
-# Add Bluetooth A2DP
-... | sudo bash -s -- --with-bt
-
-# Add SquarePi EQ™ visual DSP interface
-... | sudo bash -s -- --with-eq
-
 # Add DLNA/UPnP renderer
 ... | sudo bash -s -- --with-dlna
 
@@ -196,9 +191,21 @@ curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-insta
 # Add AirPlay
 ... | sudo bash -s -- --with-airplay
 
-# Everything
+# Everything (Bluetooth + EQ UI + DLNA + Spotify + AirPlay)
 ... | sudo bash -s -- --all
 ```
+
+### Skip a default feature
+
+```bash
+# Skip Bluetooth
+... | sudo bash -s -- --without-bt
+
+# Skip the EQ web UI (EQ presets in myMPD remain)
+... | sudo bash -s -- --without-eq
+```
+
+If a BlueALSA package isn't available on your OS image, the installer logs a warning and continues without Bluetooth — the core install never aborts.
 
 ### Clone and run locally
 
@@ -206,14 +213,15 @@ curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-insta
 git clone https://github.com/sijah/Square_PI.git
 cd Square_PI/squarepi-installer
 
-sudo bash install.sh --all               # everything
-sudo bash install.sh --with-bt --with-eq # Bluetooth + DSP UI only
+sudo bash install.sh                      # Bluetooth + EQ UI (default)
+sudo bash install.sh --all                # everything
+sudo bash install.sh --without-bt         # skip Bluetooth
 ```
 
 ### Optional: auto-reboot and custom hostname
 
 ```bash
-sudo SQUAREPI_HOSTNAME=squarepi SQUAREPI_AUTO_REBOOT=1 bash install.sh --all
+sudo SQUAREPI_HOSTNAME=squarepi SQUAREPI_AUTO_REBOOT=1 bash install.sh
 ```
 
 ### After install
@@ -361,7 +369,7 @@ Hardware designed in **KiCad**. PCB fabricated at **JLCPCB**.
 </details>
 
 <details>
-<summary>With --with-bt</summary>
+<summary>Bluetooth (default — skip with --without-bt)</summary>
 
 | Component | Purpose |
 |---|---|
@@ -369,12 +377,12 @@ Hardware designed in **KiCad**. PCB fabricated at **JLCPCB**.
 | `bluez-alsa-utils` | BlueALSA, routes BT audio to ALSA |
 | `squarepi-bt-agent` | Auto-accept pairing, no PIN |
 | `squarepi-bt-setup.service` | Keeps adapter discoverable and pairable after every reboot |
-| `/etc/asound.conf` dmix | Shared ALSA output — BT and MPD play simultaneously |
+| `/etc/asound.conf` dmix + softvol | Shared ALSA output — BT and MPD play simultaneously; BT Volume control |
 
 </details>
 
 <details>
-<summary>With --with-eq</summary>
+<summary>EQ web UI (default — skip with --without-eq)</summary>
 
 | Component | Purpose |
 |---|---|

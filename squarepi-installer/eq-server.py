@@ -12,7 +12,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-EQ_SERVER_VER = "1.3.4"
+EQ_SERVER_VER = "1.4.0"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
@@ -207,7 +207,7 @@ def set_balance(balance):
 
 
 def _bt_vol_load_saved():
-    """Read persisted BT volume from file. Returns 25 if file missing or invalid."""
+    """Read persisted BT volume from file. Returns 50 if file missing or invalid."""
     try:
         with open(BT_VOL_FILE) as f:
             return max(0, min(100, int(f.read().strip())))
