@@ -84,7 +84,7 @@ All presets available in myMPD Scripts (tap to apply) and in the visual DSP inte
 | Interface | URL | Notes |
 |---|---|---|
 | myMPD web UI | `http://squarepi.local:8080` | Mobile-optimised, always installed |
-| SquarePi EQ™ DSP | `http://squarepi.local:8081` | Visual 15-band EQ, optional (`--with-eq`) |
+| SquarePi EQ™ DSP | `http://squarepi.local:8081` | Visual 15-band EQ, installed by default |
 | MPD | `squarepi.local:6600` | For dedicated music player apps |
 | DLNA renderer | Appears in DLNA apps as `SquarePi` | Optional (`--with-dlna`) |
 
@@ -95,7 +95,7 @@ Sleep timer: 30 / 60 / 90 min + cancel — one tap in myMPD Scripts, no extra in
 ## Setup
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash -s -- --all
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash
 ```
 
 The installer:
@@ -104,10 +104,10 @@ The installer:
 - Installs MPD, myMPD, ALSA utilities
 - Configures 48kHz/24-bit audio pipeline with SoXR resampling
 - Installs all 13 EQ presets and sleep timer scripts
-- Optionally adds Bluetooth, DLNA, Spotify Connect, AirPlay, and visual DSP UI
+- Sets up Bluetooth and the visual DSP UI by default; adds DLNA, Spotify Connect, AirPlay on request
 - Sets hostname to `squarepi`, enables mDNS
 - Starts all services and verifies they are running
-- No reboot required unless using `--with-bt` (Bluetooth needs kernel module reload)
+- A reboot is required to load the audio driver; Bluetooth is on by default (skip with `--without-bt`)
 
 ---
 
