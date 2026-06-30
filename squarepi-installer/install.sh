@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 sijah
 # =============================================================================
 #  SquarePi Installer
 #  Installs SquarePi audio driver, MPD, myMPD, and Bluetooth A2DP on RPi OS Lite

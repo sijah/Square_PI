@@ -144,7 +144,7 @@ Requires Raspberry Pi OS Lite — Bookworm (Debian 12) or Trixie (Debian 13).
 | Protocols | **7 simultaneous** | Limited | Limited |
 | EQ | **15-band hardware DSP** | 3-band app sliders | 3-band app sliders |
 | 48kHz/24-bit upscaling | **SquarePi Upscaler™** | No | No |
-| Open source | **Fully (MIT)** | No | No |
+| Open source | **Fully (GPLv3)** | No | No |
 | Hackable / forkable | **Yes** | No | No |
 | Setup | **One command** | App + account | App + account |
 
@@ -183,7 +183,7 @@ Hardware design files (Gerbers, BOM, KiCad project): [Releases](https://github.c
 
 ## License
 
-MIT. Use it, fork it, build on it. Attribution appreciated.
+GPL v3. Use it, fork it, build on it — modified versions you distribute must stay open under GPL v3.
 
 ---
 

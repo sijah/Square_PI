@@ -1,7 +1,7 @@
 # SquarePi
 
 [![Version](https://img.shields.io/badge/installer-v1.4.1-blue)](https://github.com/sijah/Square_PI/releases)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.com)
 [![Hardware](https://img.shields.io/badge/hardware-SquarePi-orange)](docs/audio-engine.md)
 [![Stars](https://img.shields.io/github/stars/sijah/Square_PI?style=social)](https://github.com/sijah/Square_PI)
@@ -264,7 +264,7 @@ Open myMPD: `http://squarepi.local:8080`
 | Protocols | **BT · DLNA · Spotify · AirPlay · USB · Radio** | BT · AirPlay · Spotify | BT · AirPlay |
 | EQ | **15-band hardware DSP** | 3-band app sliders | 3-band app sliders |
 | Audio upscaling | **48kHz / 24-bit** | None | None |
-| Open source | **Yes (MIT)** | No | No |
+| Open source | **Yes (GPLv3)** | No | No |
 | Setup | **One command** | App + account | App + account |
 
 ---
@@ -598,7 +598,7 @@ Issues, pull requests, and forks welcome.
 
 ## License
 
-MIT — do what you want. Attribution appreciated.
+GPL v3 — free to use, modify, and distribute. If you distribute a modified version, it must also be GPL v3 with source available. See [LICENSE](LICENSE).
 
 ---
 
