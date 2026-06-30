@@ -12,7 +12,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-EQ_SERVER_VER = "1.4.0"
+EQ_SERVER_VER = "1.4.1"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
@@ -268,6 +268,69 @@ def _bt_vol_restore_thread():
         was_present = is_present
 
 
+def _mpd_now_playing():
+    """Query MPD over its socket for the current song. Stdlib only, fully fail-safe."""
+    try:
+        import socket
+        s = socket.create_connection(("127.0.0.1", 6600), timeout=0.4)
+        s.settimeout(0.4)
+        f = s.makefile("rw", encoding="utf-8", newline="\n")
+        f.readline()  # greeting line: "OK MPD <version>"
+        f.write("command_list_begin\nstatus\ncurrentsong\ncommand_list_end\n")
+        f.flush()
+        data = {}
+        for line in f:
+            if line.startswith("OK") or line.startswith("ACK"):
+                break
+            if ": " in line:
+                k, v = line.split(": ", 1)
+                data.setdefault(k.strip(), v.strip())
+        try:
+            s.close()
+        except Exception:
+            pass
+        if data.get("state") != "play":
+            return None
+        title = data.get("Title") or ""
+        artist = data.get("Artist") or ""
+        if not title:
+            f2 = data.get("file") or ""
+            title = data.get("Name") or (f2.rsplit("/", 1)[-1] if f2 else "")
+        if not title:
+            return None
+        return {"playing": True, "title": title, "artist": artist, "source": "MPD"}
+    except Exception:
+        return None
+
+
+def _bt_now_playing():
+    """Best-effort AVRCP track metadata from BlueZ over D-Bus. None on any failure."""
+    try:
+        import dbus
+        bus = dbus.SystemBus()
+        mgr = dbus.Interface(bus.get_object("org.bluez", "/"),
+                             "org.freedesktop.DBus.ObjectManager")
+        for _path, ifaces in mgr.GetManagedObjects(timeout=1.0).items():
+            mp = ifaces.get("org.bluez.MediaPlayer1")
+            if not mp:
+                continue
+            track = mp.get("Track", {}) or {}
+            title = str(track.get("Title", "")) if track else ""
+            artist = str(track.get("Artist", "")) if track else ""
+            if not title:
+                continue
+            return {"playing": True, "title": title, "artist": artist, "source": "Bluetooth"}
+        return None
+    except Exception:
+        return None
+
+
+def get_now_playing():
+    """Track for the now-playing strip. Tries MPD, then Bluetooth AVRCP.
+    Always returns a dict; never raises."""
+    return _mpd_now_playing() or _bt_now_playing() or {"playing": False}
+
+
 def get_state():
     """Return all DSP state in one call."""
     bands = {label: amixer_get(ctrl) for label, ctrl in BANDS}
@@ -296,6 +359,7 @@ HTML = r"""<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SquarePi DSP</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 28'><rect width='36' height='28' rx='6' fill='%23080a0e'/><polyline points='4,21 4,9 12,9 12,21 20,21 20,9 28,9 28,21 33,21' fill='none' stroke='%23f59e0b' stroke-width='2.6' stroke-linejoin='miter' stroke-linecap='square'/></svg>">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -303,6 +367,7 @@ HTML = r"""<!DOCTYPE html>
     --bg:#080a0e; --sur:#0d1117; --pan:#0f1520;
     --bdr:#1e293b; --txt:#cbd5e1; --mut:#475569; --dim:#1e293b;
     --grn:#22c55e; --red:#ef4444; --blu:#60a5fa;
+    --eq-panel:#05090f; --eq-track:#1a2840; --label:#7d90a8; --tick:#4a6892;
   }
   html,body { height:100%; overflow:hidden; }
   body { background:var(--bg); color:var(--txt); font-family:'Courier New','Lucida Console',monospace; }
@@ -314,7 +379,7 @@ HTML = r"""<!DOCTYPE html>
   .topbar { display:flex; align-items:center; background:var(--sur); border-bottom:1px solid var(--bdr); padding:0 14px; gap:10px; }
   .topbar-brand { display:flex; align-items:center; gap:10px; width:184px; flex-shrink:0; }
   .brand-name { font-size:0.88rem; font-weight:700; letter-spacing:0.2em; color:var(--acc); }
-  .brand-sub { font-size:0.46rem; color:var(--mut); letter-spacing:0.14em; margin-top:1px; }
+  .brand-sub { font-size:0.58rem; color:var(--mut); letter-spacing:0.12em; margin-top:1px; }
   .topbar-center { flex:1; }
   .topbar-actions { display:flex; align-items:center; gap:6px; }
   .tb-btn { background:var(--pan); color:var(--txt); border:1px solid var(--bdr); border-radius:3px; padding:5px 11px; font-size:0.57rem; font-family:inherit; letter-spacing:0.08em; cursor:pointer; }
@@ -329,15 +394,15 @@ HTML = r"""<!DOCTYPE html>
   /* Left sidebar */
   .sidebar { background:var(--sur); border-right:1px solid var(--bdr); display:flex; flex-direction:column; overflow-y:auto; }
   .nav-group { padding:8px 0; flex:1; }
-  .nav-item { display:flex; align-items:center; gap:9px; padding:10px 16px; font-size:0.56rem; letter-spacing:0.1em; color:var(--mut); cursor:pointer; border-left:2px solid transparent; text-transform:uppercase; user-select:none; }
+  .nav-item { display:flex; align-items:center; gap:9px; padding:10px 16px; font-size:0.66rem; letter-spacing:0.08em; color:var(--mut); cursor:pointer; border-left:2px solid transparent; text-transform:uppercase; user-select:none; }
   .nav-item:hover { background:var(--pan); color:var(--txt); }
   .nav-item.active { color:var(--acc); border-left-color:var(--acc); background:var(--pan); }
   .nav-icon { font-size:0.85rem; width:14px; text-align:center; flex-shrink:0; }
   .nav-divider { height:1px; background:var(--bdr); margin:4px 0; }
   .device-info { padding:12px 16px; border-top:1px solid var(--bdr); }
-  .d-lbl { font-size:0.46rem; color:var(--dim); letter-spacing:0.1em; text-transform:uppercase; margin-top:6px; }
+  .d-lbl { font-size:0.58rem; color:var(--mut); letter-spacing:0.1em; text-transform:uppercase; margin-top:6px; }
   .d-lbl:first-child { margin-top:0; }
-  .d-val { font-size:0.6rem; color:var(--txt); margin-top:1px; }
+  .d-val { font-size:0.7rem; color:var(--txt); margin-top:1px; }
   .s-dot { display:inline-block; width:5px; height:5px; border-radius:50%; background:var(--grn); box-shadow:0 0 4px var(--grn); margin-right:5px; vertical-align:middle; }
 
   /* Main content */
@@ -349,7 +414,7 @@ HTML = r"""<!DOCTYPE html>
   .card-title { font-size:0.62rem; font-weight:700; color:var(--acc); letter-spacing:0.14em; flex-shrink:0; }
   .card-body { padding:12px 14px; background:var(--bg); }
   .eq-hdr-ctrls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; flex:1; justify-content:flex-end; }
-  .preset-lbl { font-size:0.5rem; color:var(--mut); letter-spacing:0.08em; }
+  .preset-lbl { font-size:0.6rem; color:var(--label); letter-spacing:0.08em; }
   .preset-sel { background:var(--pan); color:var(--txt); border:1px solid var(--bdr); border-radius:2px; padding:4px 8px; font-size:0.55rem; font-family:inherit; letter-spacing:0.04em; outline:none; cursor:pointer; }
   .action-btn { background:var(--pan); color:var(--mut); border:1px solid var(--bdr); border-radius:2px; padding:4px 9px; font-size:0.55rem; font-family:inherit; letter-spacing:0.07em; cursor:pointer; }
   .action-btn:hover { border-color:var(--acc-dim); color:var(--txt); }
@@ -373,26 +438,26 @@ HTML = r"""<!DOCTYPE html>
   .pre-btn.active { background:var(--acc); border-color:var(--acc); color:#000; font-weight:700; }
 
   /* ── EQ RACK ── */
-  .eq-curve-wrap { background:#040710; border:1px solid #0f1828; border-radius:3px 3px 0 0; border-bottom:none; position:relative; height:180px; overflow:hidden; }
+  .eq-curve-wrap { background:var(--eq-panel); border:1px solid #0f1828; border-radius:3px 3px 0 0; border-bottom:none; position:relative; height:180px; overflow:hidden; }
   #eq-curve { width:100%; display:block; }
-  .curve-lbl { position:absolute; top:4px; right:7px; font-size:0.47rem; color:#2a4060; letter-spacing:0.12em; }
+  .curve-lbl { position:absolute; top:4px; right:7px; font-size:0.56rem; color:var(--tick); letter-spacing:0.1em; }
 
-  .eq-rack { background:#04080e; border:1px solid #0f1828; border-radius:0 0 3px 3px; padding:4px 2px 6px 2px; display:flex; align-items:stretch; }
+  .eq-rack { background:var(--eq-panel); border:1px solid #0f1828; border-radius:0 0 3px 3px; padding:4px 2px 6px 2px; display:flex; align-items:stretch; }
   .db-scale { display:flex; flex-direction:column; justify-content:space-between; padding:23px 6px 16px 0; min-width:30px; }
   .db-scale.right { padding:23px 0 16px 6px; }
-  .db-tick { font-size:0.44rem; color:#3a5570; text-align:right; line-height:1; }
+  .db-tick { font-size:0.56rem; color:var(--tick); text-align:right; line-height:1; }
   .db-tick.z { color:#6090b0; font-weight:700; }
   .db-scale.right .db-tick { text-align:left; }
 
   .eq-grid { display:grid; grid-template-columns:repeat(15,1fr); gap:1px; flex:1; }
   .band { display:flex; flex-direction:column; align-items:center; }
 
-  .band-db { background:#030508; border:1px solid #0d1320; border-radius:2px; font-size:0.47rem; font-weight:700; min-height:15px; width:100%; text-align:center; padding:2px 0; letter-spacing:-0.02em; white-space:nowrap; overflow:hidden; color:var(--mut); margin-bottom:2px; font-family:'Courier New',monospace; }
+  .band-db { background:var(--eq-panel); border:1px solid #0d1320; border-radius:2px; font-size:0.6rem; font-weight:700; min-height:17px; width:100%; text-align:center; padding:2px 0; letter-spacing:-0.02em; white-space:nowrap; overflow:hidden; color:var(--label); margin-bottom:2px; font-family:'Courier New',monospace; }
   .band-db.pos { color:var(--acc); }
   .band-db.neg { color:var(--blu); }
 
   .fader-wrap { position:relative; width:100%; height:160px; overflow:hidden; }
-  .fader-track { position:absolute; width:5px; height:140px; background:#1a2840; border-radius:3px; top:10px; left:50%; transform:translateX(-50%); z-index:0; }
+  .fader-track { position:absolute; width:5px; height:140px; background:var(--eq-track); border-radius:3px; top:10px; left:50%; transform:translateX(-50%); z-index:0; }
   .fader-zero { position:absolute; width:14px; height:2px; background:#3a6080; top:80px; left:50%; transform:translateX(-50%); z-index:3; border-radius:1px; }
 
   input.vsl {
@@ -414,7 +479,7 @@ HTML = r"""<!DOCTYPE html>
   input.vsl::-moz-range-track { height:4px; background:transparent; border-radius:2px; }
   input.vsl::-moz-range-thumb { width:18px; height:18px; background:#c0ccd8; border-radius:50%; border:2px solid #506070; }
 
-  .band-freq { font-size:0.42rem; color:#3a5570; text-align:center; padding-top:4px; letter-spacing:-0.01em; }
+  .band-freq { font-size:0.56rem; color:var(--label); text-align:center; padding-top:4px; letter-spacing:-0.01em; }
 
   .custom-save-row { display:flex; align-items:center; gap:8px; margin:9px 0 8px; flex-wrap:wrap; }
   .custom-save-row input { background:var(--sur); color:var(--txt); border:1px solid var(--bdr); border-radius:2px; padding:6px 11px; font-size:0.65rem; font-family:inherit; width:160px; outline:none; letter-spacing:0.04em; }
@@ -436,7 +501,7 @@ HTML = r"""<!DOCTYPE html>
   /* System stat cards */
   .sys-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:12px; }
   .sys-stat-card { background:var(--sur); border:1px solid var(--bdr); border-radius:4px; padding:8px 10px; }
-  .sys-stat-lbl { font-size:0.5rem; color:var(--mut); letter-spacing:0.1em; text-transform:uppercase; }
+  .sys-stat-lbl { font-size:0.6rem; color:var(--label); letter-spacing:0.1em; text-transform:uppercase; }
   .sys-stat-val { font-size:0.88rem; font-weight:700; font-family:'Courier New',monospace; margin-top:2px; color:var(--txt); }
   .sys-stat-val.ok { color:var(--grn); }
   .sys-stat-val.warn { color:var(--acc); }
@@ -445,13 +510,13 @@ HTML = r"""<!DOCTYPE html>
   .sys-led.warn { background:var(--acc); box-shadow:0 0 6px var(--acc); }
   .sys-led.err { background:var(--red); box-shadow:0 0 6px var(--red); animation:blink 1s infinite; }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
-  .faults-section-title { font-size:0.55rem; color:var(--dim); letter-spacing:0.12em; text-transform:uppercase; margin:10px 0 8px; }
+  .faults-section-title { font-size:0.6rem; color:var(--label); letter-spacing:0.12em; text-transform:uppercase; margin:10px 0 8px; }
   .faults-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-bottom:13px; }
   .fault-item { display:flex; flex-direction:column; align-items:center; gap:5px; background:var(--sur); border:1px solid var(--bdr); border-radius:4px; padding:8px 4px; }
   .fdot { width:8px; height:8px; border-radius:50%; background:var(--grn); box-shadow:0 0 5px var(--grn); flex-shrink:0; transition:all 0.3s; }
   .fdot.warn { background:var(--acc); box-shadow:0 0 5px var(--acc); }
   .fdot.err { background:var(--red); box-shadow:0 0 5px var(--red); animation:blink 1s infinite; }
-  .fault-name { font-size:0.49rem; color:var(--mut); text-align:center; line-height:1.3; }
+  .fault-name { font-size:0.58rem; color:var(--label); text-align:center; line-height:1.3; }
 
   .save-row { display:flex; align-items:center; gap:12px; }
   .save-btn { background:var(--sur); color:var(--txt); border:1px solid var(--bdr); border-radius:3px; padding:7px 16px; font-size:0.65rem; font-family:inherit; letter-spacing:0.07em; cursor:pointer; }
@@ -465,6 +530,35 @@ HTML = r"""<!DOCTYPE html>
   .locked-notice { font-size:0.53rem; color:#2a3a4a; background:var(--pan); border:1px solid var(--bdr); border-radius:3px; padding:8px; text-align:center; letter-spacing:0.04em; line-height:1.6; }
 
 
+  /* Theme selector (top bar) */
+  .theme-sel { background:var(--pan); color:var(--txt); border:1px solid var(--bdr); border-radius:3px; padding:5px 9px; font-size:0.57rem; font-family:inherit; letter-spacing:0.05em; cursor:pointer; outline:none; }
+  .brand-logo polyline { stroke:var(--acc); }
+
+  /* Now-playing strip */
+  .nowplay { display:flex; align-items:center; gap:9px; background:var(--sur); border:1px solid var(--bdr); border-left:3px solid var(--grn); border-radius:6px; padding:7px 11px; margin-bottom:8px; }
+  .nowplay.idle { border-left-color:var(--bdr); opacity:0.65; }
+  .np-art { width:30px; height:30px; border-radius:4px; background:var(--pan); display:flex; align-items:center; justify-content:center; color:var(--acc); font-size:15px; flex-shrink:0; }
+  .np-meta { flex:1; min-width:0; }
+  .np-src { font-size:0.55rem; color:var(--label); letter-spacing:0.12em; text-transform:uppercase; }
+  .np-track { font-size:0.72rem; color:var(--txt); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px; }
+  .np-vu { display:flex; align-items:flex-end; gap:2px; height:18px; flex-shrink:0; }
+  .np-vu i { width:3px; background:var(--grn); border-radius:1px; height:5px; transition:height 0.25s; }
+
+  /* A/B compare + unsaved chip */
+  .ab-wrap { display:flex; align-items:center; gap:4px; }
+  .ab-lbl { font-size:0.55rem; color:var(--label); letter-spacing:0.08em; }
+  .ab-btn { font-size:0.6rem; font-weight:700; font-family:inherit; border:1px solid var(--bdr); background:var(--sur); color:var(--mut); border-radius:2px; padding:3px 10px; cursor:pointer; letter-spacing:0.05em; }
+  .ab-btn.active { background:var(--acc); border-color:var(--acc); color:#000; }
+  .unsaved-chip { display:none; align-items:center; gap:4px; font-size:0.55rem; color:var(--acc); letter-spacing:0.08em; }
+  .unsaved-chip.show { display:inline-flex; }
+  .unsaved-chip .udot { width:6px; height:6px; border-radius:50%; background:var(--acc); }
+
+  /* Preset sparkline */
+  .pre-btn { display:inline-flex; align-items:center; gap:6px; }
+  .pre-spark { width:28px; height:12px; flex-shrink:0; }
+  .pre-spark path { fill:none; stroke:var(--acc); stroke-width:1.4; }
+  .pre-btn.active .pre-spark path { stroke:#000; }
+
   /* Responsive */
   @media (max-width:680px) { .columns { grid-template-columns:1fr; } .sidebar { display:none; } }
 </style>
@@ -475,9 +569,9 @@ HTML = r"""<!DOCTYPE html>
 <!-- TOP BAR -->
 <div class="topbar">
   <div class="topbar-brand">
-    <svg width="28" height="18" viewBox="0 0 36 22" fill="none">
+    <svg class="brand-logo" width="28" height="18" viewBox="0 0 36 22" fill="none">
       <polyline points="0,18 0,4 9,4 9,18 18,18 18,4 27,4 27,18 36,18 36,11"
-                stroke="#f59e0b" stroke-width="2.2" fill="none"
+                stroke-width="2.2" fill="none"
                 stroke-linecap="square" stroke-linejoin="miter"/>
     </svg>
     <div>
@@ -487,6 +581,14 @@ HTML = r"""<!DOCTYPE html>
   </div>
   <div class="topbar-center"></div>
   <div class="topbar-actions">
+    <select class="theme-sel" id="theme-sel" title="Colour theme" onchange="applyTheme(this.value, true)">
+      <option value="amber">Amber</option>
+      <option value="blue">Studio</option>
+      <option value="green">Phosphor</option>
+      <option value="mcintosh">McIntosh</option>
+      <option value="graphite">Graphite</option>
+      <option value="daylight">Daylight</option>
+    </select>
     <button class="tb-btn" onclick="saveSettings()">SAVE</button>
     <select class="preset-sel-top" onchange="if(this.value){applyPreset(this.value);this.value=''}">
       <option value="">PRESETS &#9660;</option>
@@ -541,6 +643,16 @@ HTML = r"""<!DOCTYPE html>
 <!-- MAIN CONTENT -->
 <div class="content" id="content">
 
+<!-- NOW PLAYING -->
+<div class="nowplay idle" id="nowplay">
+  <div class="np-art">&#9835;</div>
+  <div class="np-meta">
+    <div class="np-src" id="np-src">Not playing</div>
+    <div class="np-track" id="np-track">&#8212;</div>
+  </div>
+  <div class="np-vu" id="np-vu" style="display:none"><i></i><i></i><i></i><i></i><i></i></div>
+</div>
+
 <!-- GAIN & BALANCE -->
 <div class="card" id="card-gain">
   <div class="card-hdr">
@@ -569,7 +681,14 @@ HTML = r"""<!DOCTYPE html>
 <div class="card" id="card-eq">
   <div class="card-hdr">
     <span class="card-title">&#x25BA; EQUALIZER &mdash; 15 BAND</span>
+    <span class="unsaved-chip" id="unsaved-chip"><span class="udot"></span>UNSAVED</span>
     <div class="eq-hdr-ctrls">
+      <span class="ab-lbl">A/B</span>
+      <div class="ab-wrap">
+        <button class="ab-btn active" id="ab-a" onclick="abSwitch('A')">A</button>
+        <button class="ab-btn" id="ab-b" onclick="abSwitch('B')">B</button>
+        <button class="action-btn" onclick="abCopy()" title="Copy active slot to the other">COPY</button>
+      </div>
       <button class="tog active" id="eq-on"  onclick="setEqBypass(true)">ON</button>
       <button class="tog"        id="eq-off" onclick="setEqBypass(false)">OFF</button>
       <span class="preset-lbl">PRESET</span>
@@ -753,13 +872,119 @@ function freqShort(lbl) {
   if (hz >= 1000)  return (hz/1000).toFixed(1)+'k';
   return hz+'';
 }
+const DIRTY_ENDPOINTS = ['/api/band','/api/gain','/api/balance','/api/preset','/api/custom-preset/apply','/api/mixer','/api/eq-bypass'];
 function post(url, data) {
+  if (DIRTY_ENDPOINTS.indexOf(url) !== -1) markDirty();
+  else if (url === '/api/store') clearDirty();
   return fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data ?? {})});
 }
 function showStatus(msg) {
   const el = document.getElementById('status');
+  if (!el) return;
   el.textContent = msg;
   if (msg) setTimeout(() => { el.textContent = ''; }, 3000);
+}
+
+// ── Unsaved indicator ───────────────────────────────────────────────────────────
+let suppressDirty = true;   // true during initial load so loadState() doesn't flag dirty
+function markDirty(){ if(suppressDirty) return; const c=document.getElementById('unsaved-chip'); if(c) c.classList.add('show'); }
+function clearDirty(){ const c=document.getElementById('unsaved-chip'); if(c) c.classList.remove('show'); }
+
+// ── Theme engine ────────────────────────────────────────────────────────────────
+const THEMES = {
+  amber:{ '--acc':'#f59e0b','--acc-dim':'#78350f','--bg':'#080a0e','--sur':'#0d1117','--pan':'#0f1520','--bdr':'#1e293b','--txt':'#cbd5e1','--mut':'#475569','--dim':'#1e293b','--grn':'#22c55e','--red':'#ef4444','--blu':'#60a5fa','--eq-panel':'#05090f','--eq-track':'#1a2840','--label':'#7d90a8','--tick':'#4a6892' },
+  blue:{ '--acc':'#38bdf8','--acc-dim':'#0c4a6e','--bg':'#060910','--sur':'#0d1420','--pan':'#101a2e','--bdr':'#1c2740','--txt':'#cbd5e1','--mut':'#4a5a72','--dim':'#1c2740','--grn':'#22c55e','--red':'#ef4444','--blu':'#818cf8','--eq-panel':'#060c16','--eq-track':'#19283f','--label':'#7d90a8','--tick':'#42587a' },
+  green:{ '--acc':'#4ade80','--acc-dim':'#14532d','--bg':'#060a06','--sur':'#0c140c','--pan':'#0e1a0e','--bdr':'#1c2c1c','--txt':'#c8e6c8','--mut':'#4a6a4a','--dim':'#1c2c1c','--grn':'#4ade80','--red':'#ef4444','--blu':'#a3e635','--eq-panel':'#060e06','--eq-track':'#1c3320','--label':'#7da880','--tick':'#4a7a4a' },
+  mcintosh:{ '--acc':'#2ea3f2','--acc-dim':'#0c3a66','--bg':'#04060a','--sur':'#0a0e16','--pan':'#0d1320','--bdr':'#16203a','--txt':'#d0d8e0','--mut':'#46566e','--dim':'#16203a','--grn':'#00e5b0','--red':'#ef4444','--blu':'#00e5b0','--eq-panel':'#05080f','--eq-track':'#15233c','--label':'#7488a8','--tick':'#3e5478' },
+  graphite:{ '--acc':'#e8eaed','--acc-dim':'#52525b','--bg':'#0e0e10','--sur':'#17171a','--pan':'#1c1c20','--bdr':'#2c2c33','--txt':'#d4d4d8','--mut':'#6b6b72','--dim':'#2c2c33','--grn':'#22c55e','--red':'#ef4444','--blu':'#a1a1aa','--eq-panel':'#0f0f12','--eq-track':'#2a2a30','--label':'#8a8a93','--tick':'#5a5a62' },
+  daylight:{ '--acc':'#d97706','--acc-dim':'#fde6c5','--bg':'#eef1f5','--sur':'#ffffff','--pan':'#f4f6f9','--bdr':'#d3d9e0','--txt':'#1e293b','--mut':'#7a8aa0','--dim':'#d3d9e0','--grn':'#16a34a','--red':'#dc2626','--blu':'#2563eb','--eq-panel':'#e9edf2','--eq-track':'#cbd5e1','--label':'#5a6678','--tick':'#7a8aa0' }
+};
+function applyTheme(name, save){
+  const t = THEMES[name] || THEMES.amber;
+  const root = document.documentElement;
+  for (const k in t) root.style.setProperty(k, t[k]);
+  if (save) { try { localStorage.setItem('squarepi-theme', name); } catch(e){} }
+  const sel = document.getElementById('theme-sel'); if (sel) sel.value = name;
+  if (typeof drawCurve === 'function') drawCurve();
+  for (let i=0;i<15;i++){ const sl=document.getElementById('bs-'+i); if(sl) updateFaderFill(i, sl.value); }
+}
+function initTheme(){
+  let name='amber';
+  try { name = localStorage.getItem('squarepi-theme') || 'amber'; } catch(e){}
+  if (!THEMES[name]) name='amber';
+  applyTheme(name, false);
+}
+function themeColors(){
+  const cs=getComputedStyle(document.documentElement);
+  const g=(k,d)=>{ const v=cs.getPropertyValue(k); return (v&&v.trim())||d; };
+  return { acc:g('--acc','#f59e0b'), cut:g('--blu','#3b82f6'), track:g('--eq-track','#1a2840'), tick:g('--tick','#4a6892'), panel:g('--eq-panel','#05090f') };
+}
+function hexToRgba(hex,a){
+  hex=(hex||'').replace('#','').trim();
+  if(hex.length===3) hex=hex.split('').map(c=>c+c).join('');
+  const n=parseInt(hex||'0',16);
+  return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';
+}
+
+// ── Now playing strip ───────────────────────────────────────────────────────────
+function pollNowPlaying(){
+  fetch('/api/nowplaying').then(r=>r.json()).then(d=>{
+    const wrap=document.getElementById('nowplay');
+    const src=document.getElementById('np-src');
+    const trk=document.getElementById('np-track');
+    const vu=document.getElementById('np-vu');
+    if(!wrap) return;
+    if(d && d.playing){
+      wrap.classList.remove('idle');
+      src.textContent='Now playing'+(d.source?' · '+d.source:'');
+      trk.textContent=(d.artist? d.artist+' — ':'')+(d.title||'');
+      if(vu) vu.style.display='flex';
+    } else {
+      wrap.classList.add('idle');
+      src.textContent='Not playing';
+      trk.textContent='—';
+      if(vu) vu.style.display='none';
+    }
+  }).catch(()=>{});
+}
+function animateNpVu(){
+  const vu=document.getElementById('np-vu');
+  if(vu && vu.style.display!=='none'){ [].forEach.call(vu.children,b=>{ b.style.height=(4+Math.random()*14)+'px'; }); }
+}
+
+// ── A/B compare ─────────────────────────────────────────────────────────────────
+let abSlots={A:null,B:null}, abActive='A';
+function abReadCurrent(){ const v=[]; for(let i=0;i<15;i++){ const sl=document.getElementById('bs-'+i); v.push(sl?parseInt(sl.value):0);} return v; }
+function abUpdateUI(){ const a=document.getElementById('ab-a'), b=document.getElementById('ab-b'); if(a)a.classList.toggle('active',abActive==='A'); if(b)b.classList.toggle('active',abActive==='B'); }
+function abInit(){ abSlots.A=abReadCurrent(); abActive='A'; abUpdateUI(); }
+function abSwitch(slot){
+  if(slot===abActive) return;
+  abSlots[abActive]=abReadCurrent();
+  abActive=slot;
+  if(abSlots[slot]){ syncSliders(abSlots[slot]); post('/api/custom-preset/apply',{values:abSlots[slot]}); clearPresets(); }
+  else { abSlots[slot]=abReadCurrent(); }
+  abUpdateUI();
+  showStatus('Comparing slot '+slot);
+}
+function abCopy(){ const other=abActive==='A'?'B':'A'; abSlots[other]=abReadCurrent(); showStatus('Copied '+abActive+' → '+other); }
+
+// ── Preset sparklines ───────────────────────────────────────────────────────────
+function sparkPath(vals){
+  const W=28,H=12,mid=H/2,sc=(H/2-1)/15;
+  return 'M'+vals.map((v,i)=>(1+i*((W-2)/14)).toFixed(1)+','+(mid-v*sc).toFixed(1)).join(' L');
+}
+function renderSparklines(){
+  document.querySelectorAll('.pre-btn').forEach(btn=>{
+    if(btn.classList.contains('custom')) return;
+    if(btn.querySelector('.pre-spark')) return;
+    const oc=btn.getAttribute('onclick')||'';
+    const m=oc.match(/applyPreset\('([^']+)'\)/);
+    if(!m) return;
+    const vals=PRESET_VALUES[m[1]];
+    if(!vals) return;
+    const label=btn.textContent.trim();
+    btn.innerHTML='<svg class="pre-spark" viewBox="0 0 28 12"><path d="'+sparkPath(vals)+'"/></svg><span>'+label+'</span>';
+  });
 }
 
 
@@ -769,11 +994,12 @@ function updateFaderFill(i, v) {
   if (!track) return;
   v = parseInt(v);
   const pct = ((15 - v) / 30 * 100).toFixed(1);
-  const dark = '#1a2840';
+  const tc = themeColors();
+  const dark = tc.track;
   if (v > 0) {
-    track.style.background = `linear-gradient(to bottom,${dark} ${pct}%,#f59e0b ${pct}%,#f59e0b 50%,${dark} 50%)`;
+    track.style.background = `linear-gradient(to bottom,${dark} ${pct}%,${tc.acc} ${pct}%,${tc.acc} 50%,${dark} 50%)`;
   } else if (v < 0) {
-    track.style.background = `linear-gradient(to bottom,${dark} 50%,#3b82f6 50%,#3b82f6 ${pct}%,${dark} ${pct}%)`;
+    track.style.background = `linear-gradient(to bottom,${dark} 50%,${tc.cut} 50%,${tc.cut} ${pct}%,${dark} ${pct}%)`;
   } else {
     track.style.background = dark;
   }
@@ -794,16 +1020,17 @@ function drawCurve() {
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, W, H);
+  const tc = themeColors();
 
   // dB grid lines + labels on both sides
   [-15,-10,-5,0,5,10,15].forEach(db => {
     const y = midY - (db / 15) * (dH / 2);
     ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y);
-    ctx.strokeStyle = db === 0 ? '#253850' : '#0e1e2e';
+    ctx.strokeStyle = db === 0 ? hexToRgba(tc.tick,0.55) : hexToRgba(tc.tick,0.18);
     ctx.lineWidth = db === 0 ? 1.5 : 0.5; ctx.stroke();
     const lbl = (db > 0 ? '+' : '') + db;
     ctx.font = '9px monospace';
-    ctx.fillStyle = db === 0 ? '#5a8090' : '#2a4060';
+    ctx.fillStyle = tc.tick;
     ctx.textAlign = 'right'; ctx.fillText(lbl, padL - 4, y + 3);
     ctx.textAlign = 'left';  ctx.fillText(lbl, W - padR + 4, y + 3);
   });
@@ -836,12 +1063,12 @@ function drawCurve() {
 
   // Gradient fill — opaque at extremes, transparent at zero line
   const grad = ctx.createLinearGradient(0, padT, 0, H - padB);
-  grad.addColorStop(0,    'rgba(245,158,11,0.45)');
-  grad.addColorStop(0.48, 'rgba(245,158,11,0.02)');
-  grad.addColorStop(0.5,  'rgba(245,158,11,0)');
-  grad.addColorStop(0.5,  'rgba(59,130,246,0)');
-  grad.addColorStop(0.52, 'rgba(59,130,246,0.02)');
-  grad.addColorStop(1,    'rgba(59,130,246,0.45)');
+  grad.addColorStop(0,    hexToRgba(tc.acc,0.45));
+  grad.addColorStop(0.48, hexToRgba(tc.acc,0.02));
+  grad.addColorStop(0.5,  hexToRgba(tc.acc,0));
+  grad.addColorStop(0.5,  hexToRgba(tc.cut,0));
+  grad.addColorStop(0.52, hexToRgba(tc.cut,0.02));
+  grad.addColorStop(1,    hexToRgba(tc.cut,0.45));
 
   ctx.beginPath();
   smoothPath(pts);
@@ -849,14 +1076,14 @@ function drawCurve() {
   ctx.fillStyle = grad; ctx.fill();
 
   // Smooth curve line
-  ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+  ctx.strokeStyle = tc.acc; ctx.lineWidth = 2; ctx.lineJoin = 'round';
   ctx.beginPath(); smoothPath(pts); ctx.stroke();
 
   // Band dots
   pts.forEach(p => {
     ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
-    ctx.fillStyle = '#f59e0b'; ctx.fill();
-    ctx.strokeStyle = '#040810'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = tc.acc; ctx.fill();
+    ctx.strokeStyle = tc.panel; ctx.lineWidth = 1; ctx.stroke();
   });
 
   // Frequency labels on X axis
@@ -1116,7 +1343,9 @@ function loadState() {
     if (s.matrix) setMatrixDisplay(s.matrix);
     buildFaults(s.faults ?? {});
     updateHealthLed(s.faults ?? {});
-  }).catch(() => { buildEq(null); buildFaults(null); });
+    abInit();
+    suppressDirty = false;
+  }).catch(() => { buildEq(null); buildFaults(null); suppressDirty = false; });
   loadSysInfo();
 }
 
@@ -1144,6 +1373,8 @@ function toggleBypass() {
   setEqBypass(!isActive);
 }
 
+initTheme();
+renderSparklines();
 loadCustomPresets();
 setInterval(() => {
   fetch('/api/faults').then(r => r.json()).then(f => { updateFaults(f); updateHealthLed(f); }).catch(() => {});
@@ -1158,6 +1389,9 @@ setInterval(() => {
 }, 3000);
 window.addEventListener('resize', drawCurve);
 setInterval(loadSysInfo, 8000);
+pollNowPlaying();
+setInterval(pollNowPlaying, 5000);
+setInterval(animateNpVu, 360);
 loadState();
 </script>
 </body>
@@ -1222,6 +1456,9 @@ class Handler(BaseHTTPRequestHandler):
 
         elif p == "/api/bt-volume":
             self._json({"volume": get_bt_volume()})
+
+        elif p == "/api/nowplaying":
+            self._json(get_now_playing())
 
         elif p == "/api/sysinfo":
             temp_c = None

@@ -4,6 +4,21 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.4.1] — 2026-06-29
+
+### Added
+- **Colour themes** — a theme selector in the EQ UI header with six palettes (Amber Cockpit, Studio Blue, Phosphor Green, McIntosh Blue, Graphite, Daylight light mode). Choice persists per browser via localStorage. Themes drive the canvas curve and faders too, not just CSS.
+- **Now-playing strip** — shows the current track at the top of the EQ UI. Reads MPD over its socket and falls back to Bluetooth AVRCP metadata via D-Bus. New `GET /api/nowplaying` endpoint; fully fail-safe (never blocks the server, returns "not playing" on any error).
+- **A/B compare** — store two EQ curves and flip between them to compare by ear, with a copy-to-other-slot action.
+- **Unsaved indicator** — an "UNSAVED" chip appears when the live EQ/gain/mixer state differs from what's been saved to the chip; clears on Save.
+- **Preset sparklines** — each preset button shows a mini curve of its shape.
+
+### Fixed
+- **EQ UI legibility.** Several labels in the DSP web interface were rendering at 6.7–8px — too small to read (band frequency labels, dB values, device info, system stats, fault names). Bumped to ~9–11px and raised contrast (some labels were using a near-invisible border color as their text color).
+- Added a **favicon** — the browser tab now shows the SquarePi square-wave mark instead of the generic globe icon.
+
+---
+
 ## [1.4.0] — 2026-06-28
 
 ### Changed
