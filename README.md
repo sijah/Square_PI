@@ -1,6 +1,6 @@
 # SquarePi
 
-[![Version](https://img.shields.io/badge/installer-v1.4.1-blue)](https://github.com/sijah/Square_PI/releases)
+[![Version](https://img.shields.io/badge/installer-v1.4.2-blue)](https://github.com/sijah/Square_PI/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.com)
 [![Hardware](https://img.shields.io/badge/hardware-SquarePi-orange)](docs/audio-engine.md)
@@ -105,7 +105,7 @@ Open `http://squarepi.local:8081` for the full real-time DSP control panel.
 ![SquarePi DSP Control Interface](docs/images/EQ_UI.png)
 
 - **15 fader sliders** — DSP updates on every move
-- **Frequency response graph** — live curve, boost above the zero line, cut below
+- **Frequency response graph** — live curve (boost above the zero line, cut below); **drag any point** to set a band directly, on desktop or touch
 - **Custom preset** — save your own curve
 - **Analog Gain** — hardware output trim (0 to −15.5 dB)
 - **Balance** — L/R pan

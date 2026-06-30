@@ -34,7 +34,7 @@ Rate conversion uses **SoXR** — a polyphase resampling library used in profess
 Multiple simultaneous sources — Bluetooth from a phone and DLNA from a laptop at the same time — share the output via ALSA dmix at 48kHz / S32_LE. No source pauses another.
 
 ### SquarePi EQ™
-15-band parametric EQ running inside the TAS5805M chip over I²C. The Pi CPU handles no audio processing for equalization. 13 built-in presets, full manual control via browser, settings saved across power cycles. The browser interface adds six colour themes, a now-playing strip, A/B curve comparison, and live fault monitoring.
+15-band parametric EQ running inside the TAS5805M chip over I²C. The Pi CPU handles no audio processing for equalization. 13 built-in presets, full manual control via browser, settings saved across power cycles. The browser interface adds six colour themes, a draggable response curve, a now-playing strip, A/B curve comparison, and live fault monitoring.
 
 ---
 

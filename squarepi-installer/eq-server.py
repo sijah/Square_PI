@@ -14,7 +14,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-EQ_SERVER_VER = "1.4.1"
+EQ_SERVER_VER = "1.4.2"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
@@ -441,8 +441,8 @@ HTML = r"""<!DOCTYPE html>
 
   /* ── EQ RACK ── */
   .eq-curve-wrap { background:var(--eq-panel); border:1px solid #0f1828; border-radius:3px 3px 0 0; border-bottom:none; position:relative; height:180px; overflow:hidden; }
-  #eq-curve { width:100%; display:block; }
-  .curve-lbl { position:absolute; top:4px; right:7px; font-size:0.56rem; color:var(--tick); letter-spacing:0.1em; }
+  #eq-curve { width:100%; display:block; cursor:ns-resize; touch-action:none; }
+  .curve-lbl { position:absolute; top:4px; right:7px; font-size:0.56rem; color:var(--tick); letter-spacing:0.1em; pointer-events:none; }
 
   .eq-rack { background:var(--eq-panel); border:1px solid #0f1828; border-radius:0 0 3px 3px; padding:4px 2px 6px 2px; display:flex; align-items:stretch; }
   .db-scale { display:flex; flex-direction:column; justify-content:space-between; padding:23px 6px 16px 0; min-width:30px; }
@@ -989,6 +989,44 @@ function renderSparklines(){
   });
 }
 
+// ── Drag the response curve ─────────────────────────────────────────────────────
+// Grab the nearest band point on the graph and pull it vertically. Reuses onBand()
+// so POST / preset-clear / unsaved-flag / redraw all happen exactly like a fader move.
+function initCurveDrag(){
+  const canvas=document.getElementById('eq-curve');
+  if(!canvas) return;
+  const padL=30, padR=30, padT=8, padB=22, H=180;
+  let dragging=false, dragBand=-1;
+  function bandValueFrom(e){
+    const rect=canvas.getBoundingClientRect();
+    const W=rect.width;
+    const dH=H-padT-padB, midY=padT+dH/2;
+    const x=e.clientX-rect.left;
+    const y=(e.clientY-rect.top)*(H/rect.height);
+    let i=Math.round((x-padL)/((W-padL-padR)/14));
+    i=Math.max(0,Math.min(14,i));
+    let v=Math.round(((midY-y)/(dH/2))*15);
+    v=Math.max(-15,Math.min(15,v));
+    return {i:i, v:v};
+  }
+  function apply(e){
+    const r=bandValueFrom(e);
+    const band=dragBand>=0?dragBand:r.i;
+    const sl=document.getElementById('bs-'+band);
+    if(!sl) return;
+    if(parseInt(sl.value)!==r.v){ sl.value=r.v; onBand(band, r.v); }  // onBand posts only on integer change
+  }
+  canvas.addEventListener('pointerdown', e => {
+    dragging=true; dragBand=bandValueFrom(e).i;
+    try{ canvas.setPointerCapture(e.pointerId); }catch(_){}
+    apply(e); e.preventDefault();
+  });
+  canvas.addEventListener('pointermove', e => { if(dragging){ apply(e); e.preventDefault(); } });
+  function end(){ dragging=false; dragBand=-1; }
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+}
+
 
 // ── Fader fill — gradient on the track div ────────────────────────────────────
 function updateFaderFill(i, v) {
@@ -1377,6 +1415,7 @@ function toggleBypass() {
 
 initTheme();
 renderSparklines();
+initCurveDrag();
 loadCustomPresets();
 setInterval(() => {
   fetch('/api/faults').then(r => r.json()).then(f => { updateFaults(f); updateHealthLed(f); }).catch(() => {});

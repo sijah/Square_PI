@@ -4,6 +4,16 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.4.2] — 2026-06-30
+
+### Added
+- **Draggable EQ curve** — grab any point on the frequency-response graph and pull it up or down to set that band directly (mouse and touch). Reuses the existing band handler, so it posts to the chip, clears the active preset, and flags unsaved exactly like the faders.
+
+### Changed
+- Relicensed from MIT to **GPL v3** (`GPL-3.0-or-later`); SPDX headers added to the scripts. See [LICENSE](LICENSE).
+
+---
+
 ## [1.4.1] — 2026-06-29
 
 ### Added
