@@ -64,7 +64,7 @@ done
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.4.0"
+INSTALLER_VER="1.4.1"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"

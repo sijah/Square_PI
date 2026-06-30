@@ -1,6 +1,6 @@
 # SquarePi
 
-[![Version](https://img.shields.io/badge/installer-v1.4.0-blue)](https://github.com/sijah/Square_PI/releases)
+[![Version](https://img.shields.io/badge/installer-v1.4.1-blue)](https://github.com/sijah/Square_PI/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.com)
 [![Hardware](https://img.shields.io/badge/hardware-SquarePi-orange)](docs/audio-engine.md)
