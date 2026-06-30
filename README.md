@@ -105,12 +105,20 @@ Open `http://squarepi.local:8081` for the full real-time DSP control panel.
 ![SquarePi DSP Control Interface](docs/images/EQ_UI.png)
 
 - **15 fader sliders** — DSP updates on every move
-- **Frequency response graph** — live curve, amber = boost, blue = cut
+- **Frequency response graph** — live curve, boost above the zero line, cut below
 - **Custom preset** — save your own curve
 - **Analog Gain** — hardware output trim (0 to −15.5 dB)
 - **Balance** — L/R pan
 - **Mixer Mode** — `Stereo` / `Mono` / `Left` / `Right` (crossfeed matrix via separate L2L / R2L / L2R / R2R gain controls)
 - **Save to chip** — settings survive power cycles (`alsactl store`)
+
+Plus a few quality-of-life touches:
+
+- **Colour themes** — six palettes (Amber, Studio Blue, Phosphor Green, McIntosh Blue, Graphite, and a Daylight light mode); your choice is remembered per browser
+- **Now playing** — the current track shows at the top, from MPD or from Bluetooth when the phone sends track info
+- **A/B compare** — store two EQ curves and flip between them to compare by ear
+- **Unsaved indicator** — flags when the live EQ differs from what's saved to the chip
+- **Preset sparklines** — each preset button shows a mini preview of its curve shape
 
 Terminal access via `alsamixer` → `F6` → `LouderRaspberry`.
 
