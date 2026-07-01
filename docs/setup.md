@@ -128,8 +128,9 @@ sudo bash install.sh
 8. Sets MPD volume to 25% (safe first-boot default)
 9. Installs a first-boot EQ init service (sets all 15 bands to 0 dB, then disables itself)
 10. Installs Bluetooth and the EQ server by default; DLNA, Spotify, AirPlay when requested
-11. Verifies myMPD responds on port 8080
-12. Writes install metadata to `/etc/squarepi-release`
+11. Sets up USB auto-mount (udev + systemd) so drives mount on insert
+12. Verifies myMPD responds on port 8080
+13. Writes install metadata to `/etc/squarepi-release`
 
 ---
 
@@ -203,42 +204,17 @@ sudo chown -R mpd:audio /var/lib/mpd/music
 mpc update
 ```
 
-**Mount a USB drive:**
+**Use a USB drive — just plug it in:**
 
-Plug in the drive, then:
+SquarePi auto-mounts the drive and it appears in MPD under `usb` within a few seconds — no commands needed. FAT32, exFAT, NTFS, and ext4 all work, any label or size. Unplug to remove it.
+
 ```bash
-lsblk -f      # find partition — usually /dev/sda1
-```
-
-Mount for testing:
-```bash
-sudo mkdir -p /mnt/usb-music
-sudo mount -o uid=mpd,gid=audio,umask=0022 /dev/sda1 /mnt/usb-music
-ls /mnt/usb-music    # verify files visible
-```
-
-Make permanent — get UUID first:
-```bash
-sudo blkid /dev/sda1
-```
-
-Add to `/etc/fstab`:
-```fstab
-UUID=YOUR-UUID /mnt/usb-music vfat defaults,nofail,uid=mpd,gid=audio,umask=0022,x-systemd.automount 0 0
-```
-
-Apply:
-```bash
-sudo systemctl daemon-reload && sudo mount -a
-```
-
-Point MPD at the drive:
-```bash
-sudo nano /etc/mpd.conf
-# change: music_directory "/mnt/usb-music"
-sudo systemctl restart mpd
+# optional — confirm it mounted and force a rescan
+systemctl status 'squarepi-usb-mount@*'
 mpc update
 ```
+
+Prefer to pin a specific drive manually (by UUID) instead? See **USB Drive → Advanced** in [supported-protocols.md](supported-protocols.md) for the correct per-filesystem fstab lines.
 
 ---
 
@@ -385,17 +361,19 @@ On Linux, `avahi-daemon` must be running on the client machine too.
 
 ### USB drive not visible in MPD
 
+Auto-mount drops the drive at `/var/lib/mpd/music/usb/<dev>`. Check what happened:
 ```bash
-lsblk -f
-findmnt /mnt/usb-music
-sudo -u mpd ls /mnt/usb-music
+lsblk -f                                    # is the drive detected? which fs type?
+systemctl status 'squarepi-usb-mount@*'     # did the mount service run?
+findmnt /var/lib/mpd/music/usb/sda1         # is it mounted?
+sudo -u mpd ls /var/lib/mpd/music/usb/sda1  # can MPD read the files?
 ```
 
-Common issues:
-- Using `/dev/sda` instead of `/dev/sda1` (use the partition, not the disk)
-- Missing `uid=mpd,gid=audio` in mount options (MPD cannot read the files)
-- fstab not applied — run `sudo mount -a`
-- Library not scanned — run `mpc update`
+Common causes:
+- **Unsupported/blank filesystem** — only vfat, exFAT, NTFS, ext2/3/4 are auto-mounted; others are skipped.
+- **MPD can't see the mount** — if `sudo -u mpd ls …` is empty but `findmnt` shows it mounted, MPD's service is isolating mounts; run `sudo mount --make-shared /var/lib/mpd/music/usb/sda1` (or restart mpd).
+- **Library not scanned** — run `mpc update`.
+- Whole-disk-formatted drives mount from `/dev/sda` (no partition); the service handles this automatically.
 
 ---
 

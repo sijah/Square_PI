@@ -122,47 +122,43 @@ journalctl -u shairport-sync -n 30
 
 ## USB Drive
 
-FAT32, exFAT, and ext4 drives work. exfatprogs is installed automatically.
+**Just plug it in.** SquarePi auto-mounts the drive and it appears in MPD under `usb` — no SSH, no fstab, no config change. Unplug it to remove it.
 
-To use a USB drive you need to mount it and point MPD at the mount point — it doesn't auto-mount. Steps:
+- Works with **FAT32, exFAT, NTFS, and ext4** — any label, any size.
+- Multiple partitions or drives each mount under their own folder (`usb/sda1`, `usb/sdb1`, …).
+- The drive mounts *inside* MPD's library, so your built-in music stays visible too.
+- `exfatprogs` and `ntfs-3g` are installed automatically so exFAT/NTFS drives mount cleanly.
 
-**Quick mount (testing):**
+After plugging in, the new music appears within a few seconds. To force a rescan: `mpc update`.
 
+**How it works:** a udev rule triggers a small systemd service (`squarepi-usb-mount@<dev>`) that detects the filesystem, mounts it at `/var/lib/mpd/music/usb/<dev>` with MPD-readable permissions, and runs `mpc update`. Check it with `systemctl status 'squarepi-usb-mount@*'`.
+
+---
+
+### Advanced: manual / permanent mount
+
+If you'd rather pin a specific drive yourself, mount it by UUID. Get the UUID and filesystem:
 ```bash
-lsblk -f          # find drive — usually /dev/sda1
-sudo mkdir -p /mnt/usb-music
-sudo mount -o uid=mpd,gid=audio,umask=0022 /dev/sda1 /mnt/usb-music
+sudo blkid /dev/sda1        # shows UUID and TYPE
 ```
 
-**Persistent mount (fstab):**
-
-Get the UUID:
-```bash
-sudo blkid /dev/sda1
-```
-
-Add to `/etc/fstab` (replace `YOUR-UUID`):
+Add to `/etc/fstab` (replace `YOUR-UUID`), using the line for your filesystem — **the type must match**:
 ```fstab
-# FAT32 or exFAT
-UUID=YOUR-UUID /mnt/usb-music vfat defaults,nofail,uid=mpd,gid=audio,umask=0022,x-systemd.automount 0 0
-
+# FAT32
+UUID=YOUR-UUID /mnt/usb-music vfat    defaults,nofail,uid=mpd,gid=audio,umask=0022,x-systemd.automount 0 0
+# exFAT
+UUID=YOUR-UUID /mnt/usb-music exfat   defaults,nofail,uid=mpd,gid=audio,umask=0022,x-systemd.automount 0 0
+# NTFS
+UUID=YOUR-UUID /mnt/usb-music ntfs-3g defaults,nofail,uid=mpd,gid=audio,umask=0022,x-systemd.automount 0 0
 # ext4
-UUID=YOUR-UUID /mnt/usb-music ext4 defaults,nofail,x-systemd.automount 0 2
+UUID=YOUR-UUID /mnt/usb-music ext4    defaults,nofail,x-systemd.automount 0 2
 ```
 
-Apply:
+Apply, then point MPD at it (this **replaces** the built-in library):
 ```bash
-sudo systemctl daemon-reload
-sudo mount -a
-```
-
-**Point MPD at the drive:**
-
-```bash
-sudo nano /etc/mpd.conf
-# Set: music_directory "/mnt/usb-music"
-sudo systemctl restart mpd
-mpc update
+sudo systemctl daemon-reload && sudo mount -a
+sudo sed -i 's|^music_directory.*|music_directory "/mnt/usb-music"|' /etc/mpd.conf
+sudo systemctl restart mpd && mpc update
 ```
 
 ---

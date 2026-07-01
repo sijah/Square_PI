@@ -269,6 +269,24 @@ systemctl daemon-reload
 info "EQ server, init service and preset scripts removed"
 
 # -----------------------------------------------------------------------------
+# 10b. Remove USB auto-mount
+# -----------------------------------------------------------------------------
+step "Removing USB auto-mount"
+# Stop any live per-device mount instances and unmount their drives
+for unit in $(systemctl list-units --all --plain --no-legend 'squarepi-usb-mount@*' 2>/dev/null | awk '{print $1}'); do
+  systemctl stop "${unit}" 2>/dev/null || true
+done
+umount -l /var/lib/mpd/music/usb/* 2>/dev/null || true
+rm -f /etc/udev/rules.d/99-squarepi-usb.rules
+rm -f /etc/systemd/system/squarepi-usb-mount@.service
+rm -f /usr/local/bin/squarepi-usb-mount.sh
+rm -f /usr/local/bin/squarepi-usb-umount.sh
+rmdir /var/lib/mpd/music/usb 2>/dev/null || true
+udevadm control --reload-rules 2>/dev/null || true
+systemctl daemon-reload
+info "USB auto-mount removed (your music files are untouched)"
+
+# -----------------------------------------------------------------------------
 # 11. Remove Bluetooth stack (if installed)
 # -----------------------------------------------------------------------------
 step "Removing Bluetooth stack (if installed)"
