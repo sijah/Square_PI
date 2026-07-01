@@ -1,6 +1,6 @@
 # SquarePi
 
-[![Version](https://img.shields.io/badge/installer-v1.4.2-blue)](https://github.com/sijah/Square_PI/releases)
+[![Version](https://img.shields.io/badge/installer-v1.5.0-blue)](https://github.com/sijah/Square_PI/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.com)
 [![Hardware](https://img.shields.io/badge/hardware-SquarePi-orange)](docs/audio-engine.md)
@@ -441,7 +441,7 @@ mpc update
 
 Internet radio: add streams in myMPD → **Browse > Webradio**.
 
-USB drive: see [docs/setup.md](docs/setup.md) for full mount instructions.
+**USB drive: just plug it in.** SquarePi auto-mounts it and it appears in MPD under `usb` — no SSH, no fstab. FAT32, exFAT, NTFS, and ext4 drives all work, any label or size. Unplug to remove it. (Manual/advanced mounting is still documented in [docs/setup.md](docs/setup.md).)
 
 ---
 

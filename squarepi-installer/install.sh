@@ -66,7 +66,7 @@ done
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.4.2"
+INSTALLER_VER="1.5.0"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -584,22 +584,80 @@ systemctl restart mympd 2>/dev/null || true
 success "EQ presets + sleep timer installed — find them in myMPD under Scripts"
 
 # -----------------------------------------------------------------------------
-# 15. Prepare USB music mount point
+# 15. USB auto-mount (plug a drive in → it appears in MPD, no config needed)
 # -----------------------------------------------------------------------------
-step "Preparing USB music mount point"
-mkdir -p "${USB_MUSIC_DIR}"
+step "Setting up USB auto-mount"
+
+# Filesystem helpers so any common drive mounts: exFAT (large drives), NTFS (Windows)
+apt-get install -y -qq exfatprogs 2>/dev/null || \
+  warn "exfatprogs unavailable — exFAT USB drives may not mount"
+apt-get install -y -qq ntfs-3g 2>/dev/null || \
+  warn "ntfs-3g unavailable — NTFS USB drives may not mount"
+
+# Drives are mounted INSIDE MPD's library (<music>/usb/<dev>) so MPD scans them
+# with no mpd.conf change and the built-in library is preserved.
+USB_MOUNT_ROOT="${MPD_MUSIC_DIR}/usb"
+mkdir -p "${USB_MOUNT_ROOT}"
+chmod 755 "${USB_MOUNT_ROOT}"
+mkdir -p "${USB_MUSIC_DIR}"          # legacy manual mount point (advanced fstab path)
 chmod 755 "${USB_MUSIC_DIR}"
-success "USB music mount point ready: ${USB_MUSIC_DIR}"
 
-if apt-cache show exfatprogs &>/dev/null 2>&1; then
-  apt-get install -y -qq exfatprogs || \
-    warn "exfatprogs install failed — exFAT USB drives may need manual package setup"
+# Mount helper: detect filesystem, apply MPD-readable options, scan the new subtree
+cat > /usr/local/bin/squarepi-usb-mount.sh <<EOF
+#!/bin/bash
+# SquarePi USB auto-mount (systemd/udev-triggered). Mounts a USB partition inside
+# MPD's library so MPD scans it with no config change.
+dev="/dev/\$1"
+mp="${USB_MOUNT_ROOT}/\$1"
+[[ -b "\$dev" ]] || exit 0
+fstype=\$(lsblk -no FSTYPE "\$dev" 2>/dev/null)
+case "\$fstype" in
+  vfat|exfat)      opts="uid=mpd,gid=audio,umask=0022" ;;
+  ntfs)            opts="uid=mpd,gid=audio,umask=0022"; fstype="ntfs-3g" ;;
+  ext4|ext3|ext2)  opts="" ;;
+  *)               exit 0 ;;   # unknown / empty partition — skip
+esac
+mkdir -p "\$mp"
+if mount -t "\$fstype" \${opts:+-o "\$opts"} "\$dev" "\$mp"; then
+  mpc update "usb/\$1" >/dev/null 2>&1 || true
 else
-  warn "exfatprogs not available — exFAT USB drives may need manual package setup"
+  rmdir "\$mp" 2>/dev/null || true
 fi
+EOF
+chmod +x /usr/local/bin/squarepi-usb-mount.sh
 
-info "USB drives are not auto-mounted by this installer."
-info "Mount a drive at ${USB_MUSIC_DIR}, then set MPD music_directory to that path if desired."
+cat > /usr/local/bin/squarepi-usb-umount.sh <<EOF
+#!/bin/bash
+mp="${USB_MOUNT_ROOT}/\$1"
+umount -l "\$mp" 2>/dev/null || true
+rmdir "\$mp" 2>/dev/null || true
+mpc update "usb" >/dev/null 2>&1 || true
+EOF
+chmod +x /usr/local/bin/squarepi-usb-umount.sh
+
+# Templated service so udev can start one mount per device instance (%i = e.g. sda1)
+cat > /etc/systemd/system/squarepi-usb-mount@.service <<'EOF'
+[Unit]
+Description=SquarePi USB auto-mount for %i
+After=mpd.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/squarepi-usb-mount.sh %i
+ExecStop=/usr/local/bin/squarepi-usb-umount.sh %i
+EOF
+
+# udev: partition-with-filesystem, whole-disk-with-filesystem, and cleanup on removal.
+# ID_FS_TYPE!="" skips partition tables; ID_BUS=="usb" keeps us off the SD card.
+cat > /etc/udev/rules.d/99-squarepi-usb.rules <<'EOF'
+ACTION=="add",    SUBSYSTEM=="block", KERNEL=="sd[a-z][0-9]", ENV{ID_BUS}=="usb", ENV{ID_FS_TYPE}!="", ENV{SYSTEMD_WANTS}+="squarepi-usb-mount@%k.service"
+ACTION=="add",    SUBSYSTEM=="block", KERNEL=="sd[a-z]",      ENV{ID_BUS}=="usb", ENV{ID_FS_TYPE}!="", ENV{SYSTEMD_WANTS}+="squarepi-usb-mount@%k.service"
+ACTION=="remove", SUBSYSTEM=="block", KERNEL=="sd[a-z]*",     ENV{ID_BUS}=="usb", RUN+="/bin/systemctl --no-block stop squarepi-usb-mount@%k.service"
+EOF
+
+systemctl daemon-reload
+udevadm control --reload-rules 2>/dev/null || true
+success "USB auto-mount ready — plug a drive in and it appears in MPD under 'usb'"
 
 # -----------------------------------------------------------------------------
 # 16. First-boot EQ initialisation (flat, runs once after driver loads)
@@ -1277,7 +1335,7 @@ echo -e "  ${BOLD}myMPD Web UI:${NC}   http://${PI_IP}:${MYMPD_HTTP_PORT}"
 echo -e "  ${BOLD}mDNS URL:${NC}       http://${MDNS_HOST}.local:${MYMPD_HTTP_PORT}  ${CYAN}(no IP needed)${NC}"
 echo -e "  ${BOLD}MPD (apps):${NC}     ${PI_IP}:6600  or  ${MDNS_HOST}.local:6600"
 echo -e "  ${BOLD}Music folder:${NC}   ${MPD_MUSIC_DIR}"
-echo -e "  ${BOLD}USB mount:${NC}      ${USB_MUSIC_DIR}"
+echo -e "  ${BOLD}USB:${NC}            Auto-mounts on insert → appears in MPD under 'usb'"
 echo -e "  ${BOLD}Boot backup:${NC}    ${CONFIG_BACKUP}"
 echo -e "  ${BOLD}Release file:${NC}   ${RELEASE_FILE}"
 echo -e "  ${BOLD}Docs:${NC}           ${PROJECT_URL}"

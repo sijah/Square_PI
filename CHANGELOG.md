@@ -4,6 +4,16 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.5.0] — 2026-06-30
+
+### Added
+- **USB auto-mount on insert** — plug a drive in and it mounts automatically and shows up in MPD under `usb`; no SSH, no fstab editing. Handles **FAT32, exFAT, NTFS, and ext4**, any label, any size, and multiple partitions/drives (each mounts under its own folder). Drives mount *inside* MPD's library, so the built-in music is preserved and no `mpd.conf` change is needed. Unplugging auto-unmounts and rescans. Built from a udev rule + a templated systemd service; `ntfs-3g` is now installed alongside `exfatprogs`.
+
+### Fixed
+- **exFAT manual-mount docs were wrong** — the fstab example used type `vfat`, which fails on exFAT. Documentation now gives correct per-filesystem lines (`vfat`, `exfat`, `ntfs-3g`, `ext4`).
+
+---
+
 ## [1.4.2] — 2026-06-30
 
 ### Added
