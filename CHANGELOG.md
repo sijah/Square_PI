@@ -11,9 +11,12 @@ All notable changes to the SquarePi installer are documented here.
 
 ### Fixed
 - **Driver now survives kernel updates (DKMS).** The TAS5805M module was built with a one-off `make install`, so any `apt upgrade` that bumped the kernel silently left the module behind on the next boot — dead audio, unrecoverable for a non-technical owner. It's now packaged with **DKMS** and rebuilds automatically on every kernel change. (The device-tree overlay already lived in `/boot` and was unaffected.)
+- **Amp came back near-silent after a Power-menu shutdown.** The shutdown mute lowers `Analog Gain` to −15.5 dB so the speakers don't thump — but the EQ service's `ExecStop=/usr/sbin/alsactl store` saved that muted value on halt, and `alsactl restore` brought it back muted on the next boot, leaving playback ~15.5 dB quieter (needing far more MPD volume for the same loudness). Removed the store-on-stop; ALSA state now persists only via the UI **Save** and first-boot init, so the transient mute is never captured.
+- **Uninstall could wipe a plugged-in USB drive.** USB drives auto-mount inside `/var/lib/mpd/music/usb/<dev>`; the "remove MPD cache" step ran `rm -rf /var/lib/mpd` before unmounting them, so a mounted pendrive was deleted along with it. Uninstall now detaches every USB drive up front (and again at the delete), and the `rm` uses `--one-file-system` so it can never cross into a mounted drive.
 
 ### Changed
 - **Gain-staging safety.** `Digital Volume` is now pinned to 0 dB (value 103) on first boot and persisted — values above that apply up to +24 dB of digital boost (guaranteed clipping, possible speaker damage). `replaygain` changed `auto` → `off` for predictable per-track levels (auto did nothing for untagged files and caused jumps on tagged ones). See the new gain-staging notes in [docs/audio-engine.md](docs/audio-engine.md); for real loudness normalisation, tag the library once with `loudgain`.
+- **Analog Gain first-boot default set to −10 dB** (value 11) instead of full output, so the very first playback on unfamiliar speakers is a moderate level, never a full-output blast. This is only the first-boot default — the owner can raise or lower it in the EQ UI and their choice persists.
 
 ---
 

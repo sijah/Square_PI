@@ -726,6 +726,13 @@ done
 # possible speaker damage). Anchoring it here fixes the safe ceiling deterministically.
 amixer -c "$CARD" cset "name=Digital Volume" 103 2>/dev/null || true
 
+# Start Analog Gain at -10 dB (value 11 on the 0..31 / -15.5..0 dB scale) so the very
+# first playback is a moderate level, never a full-output blast on unfamiliar speakers.
+# This is only the FIRST-BOOT default — the owner can raise or lower it in the EQ UI and
+# their choice persists; eq-init runs once (guarded by /etc/squarepi-initialized) and
+# never overrides it again.
+amixer -c "$CARD" cset "name=Analog Gain" 11 2>/dev/null || true
+
 alsactl store 2>/dev/null || true
 touch /etc/squarepi-initialized
 INITEOF
@@ -1137,7 +1144,11 @@ After=network.target sound.target
 Type=simple
 ExecStartPre=/bin/sleep 5
 ExecStart=/usr/bin/python3 ${EQ_SERVER_DEST}
-ExecStop=/usr/sbin/alsactl store
+# NOTE: no ExecStop=alsactl store here. The Power-menu shutdown mutes the amp by
+# setting Analog Gain to 0 (-15.5 dB); an ExecStop store would capture that muted
+# value on halt, and alsactl restore would bring the amp back near-silent on the
+# next boot. State is persisted explicitly via the UI Save (/api/store) and by
+# eq-init, so shutdown never needs to (and must not) store the transient mute.
 Restart=on-failure
 RestartSec=5
 
