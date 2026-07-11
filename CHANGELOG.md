@@ -4,6 +4,17 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.5.2] — 2026-07-12
+
+### Fixed
+- **Uninstaller aborted halfway through.** Run the documented way (`curl … | sudo bash`), stdin is the pipe, so the "Remove MPD library cache?" prompt hit instant EOF; under `set -e` the failing `read` killed the whole script right after MPD was removed — leaving the driver, boot overlay, EQ/Bluetooth/USB/DLNA/AirPlay/Spotify stack and release file behind. All remaining prompts now read from `/dev/tty` (with safe defaults, honouring `SQUAREPI_YES=1`), matching the initial confirmation prompt. A failing `apt-get update` during uninstall is also no longer fatal.
+- **Analog Gain stuck at 0 dB (full output) on first boot.** The first-boot init service ran too early — the DKMS-built TAS5805M card usually wasn't enumerated yet, so every `amixer` call failed silently, yet the service still marked first-boot done and never retried. Analog Gain was left at the chip power-up default (0 dB = maximum). Init now waits for the card and its `Analog Gain` control to appear before applying anything, and exits *without* marking done if the card never shows — so it retries on the next boot instead of leaving the amp at full output.
+
+### Changed
+- **No un-vetted gain window at boot (defence in depth).** Analog gain only matters while I2S signal is flowing, and the only signal sources are MPD, Bluetooth, AirPlay, Spotify and DLNA. Every one of those services is now ordered **after** a safe-gain step: the first-boot init on first boot, and `alsactl restore` on every boot (previously only MPD waited for the gain restore). This closes the last paths where a source could play before the safe gain landed — the speakers can never blast at full output during startup.
+
+---
+
 ## [1.5.1] — 2026-07-05
 
 ### Added

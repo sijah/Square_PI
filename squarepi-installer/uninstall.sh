@@ -58,7 +58,7 @@ detach_usb_drives() {
 # Banner
 # -----------------------------------------------------------------------------
 echo -e "${BOLD}"
-INSTALLER_VER="1.5.1"
+INSTALLER_VER="1.5.2"
 
 echo "  ╔══════════════════════════════════════════════╗"
 echo "  ║         SquarePi Software Uninstaller        ║"
@@ -156,7 +156,9 @@ if [[ -f /usr/share/keyrings/jcorporation.github.io.gpg ]]; then
   info "Removed GPG keyring"
 fi
 
-apt-get update -qq
+# Don't let a failing apt update (no network, other repo issues) abort the whole
+# uninstall — the repo file/key are already gone, which is what matters here.
+apt-get update -qq || warn "apt update failed (ignored) — repo files already removed"
 success "apt repository cleaned"
 
 # -----------------------------------------------------------------------------
@@ -198,9 +200,15 @@ else
   info "MPD/MPC not installed — skipping"
 fi
 
-# Ask about MPD data files
+# Ask about MPD data files. Read from /dev/tty (not stdin) so the prompt still
+# works under `curl … | sudo bash`, where stdin is the pipe. On a truly
+# non-interactive run, default to KEEPING the data (safer).
 echo ""
-read -r -p "  Remove MPD library cache and playlists? (/var/lib/mpd) [y/N] " REMOVE_DATA
+if [[ "${SQUAREPI_YES:-0}" == "1" ]]; then
+  REMOVE_DATA="n"
+else
+  read -r -p "  Remove MPD library cache and playlists? (/var/lib/mpd) [y/N] " REMOVE_DATA < /dev/tty 2>/dev/null || REMOVE_DATA="n"
+fi
 if [[ "${REMOVE_DATA}" =~ ^[Yy]$ ]]; then
   # Drives were already detached at startup, but re-run it in case one was
   # plugged in during the uninstall. --one-file-system is the final safety net:
@@ -489,7 +497,11 @@ echo -e "  ${YELLOW}A reboot is recommended to fully unload the driver.${NC}"
 echo ""
 echo -e "  Thanks for trying SquarePi. — ${BOLD}Sijah AK${NC}"
 echo ""
-read -r -p "  Reboot now? [y/N] " REBOOT_NOW
+if [[ "${SQUAREPI_YES:-0}" == "1" ]]; then
+  REBOOT_NOW="n"
+else
+  read -r -p "  Reboot now? [y/N] " REBOOT_NOW < /dev/tty 2>/dev/null || REBOOT_NOW="n"
+fi
 if [[ "${REBOOT_NOW}" =~ ^[Yy]$ ]]; then
   echo ""
   info "Rebooting..."

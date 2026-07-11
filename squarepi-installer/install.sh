@@ -66,7 +66,7 @@ done
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.5.1"
+INSTALLER_VER="1.5.2"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -717,6 +717,22 @@ BANDS=("00020 Hz" "00032 Hz" "00050 Hz" "00080 Hz" "00125 Hz" "00200 Hz"
        "00315 Hz" "00500 Hz" "00800 Hz" "01250 Hz" "02000 Hz" "03150 Hz"
        "05000 Hz" "08000 Hz" "16000 Hz")
 
+# The DKMS-built TAS5805M card is often not enumerated yet when this fires
+# (After=sound.target is not enough). Wait for the card + its "Analog Gain"
+# control to actually exist before touching anything. If it never appears,
+# bail WITHOUT marking first-boot done, so the next boot tries again — otherwise
+# we would leave Analog Gain at the chip default (0 dB) and never fix it.
+for _try in $(seq 1 30); do
+  if amixer -c "$CARD" cget "name=Analog Gain" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+if ! amixer -c "$CARD" cget "name=Analog Gain" >/dev/null 2>&1; then
+  echo "squarepi-eq-init: card '$CARD' not ready after 30s — will retry next boot" >&2
+  exit 0
+fi
+
 for b in "${BANDS[@]}"; do
   amixer -c "$CARD" sset "$b" 0 2>/dev/null || true
 done
@@ -742,6 +758,13 @@ cat > /etc/systemd/system/squarepi-eq-init.service <<'UNITEOF'
 [Unit]
 Description=SquarePi first-boot EQ initialisation (flat)
 After=sound.target
+# Safety: every audio producer must start AFTER the safe first-boot gain is
+# applied. On first boot there is no stored ALSA state (the card did not exist at
+# install time), so alsactl restore is a no-op and Analog Gain sits at the chip
+# power-up default (0 dB = MAX). Ordering this before the audio units guarantees
+# no I2S signal can flow until Analog Gain has been pinned to -10 dB. Non-existent
+# optional units (airplay/spotify/dlna) are simply ignored by systemd.
+Before=mpd.service squarepi-eq.service bluealsa-aplay.service shairport-sync.service raspotify.service upmpdcli.service
 ConditionPathExists=!/etc/squarepi-initialized
 
 [Service]
@@ -1161,7 +1184,10 @@ cat > /etc/systemd/system/squarepi-alsa-restore.service <<EOF
 [Unit]
 Description=SquarePi ALSA state restore
 After=sound.target
-Before=mpd.service squarepi-eq.service
+# Restore the saved (safe) gain BEFORE any audio producer can emit I2S signal —
+# not just MPD but every source path (BT, AirPlay, Spotify, DLNA). Otherwise a
+# source that auto-connects early in boot could play before the gain is restored.
+Before=mpd.service squarepi-eq.service bluealsa-aplay.service shairport-sync.service raspotify.service upmpdcli.service
 
 [Service]
 Type=oneshot

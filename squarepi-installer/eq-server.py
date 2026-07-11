@@ -14,7 +14,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-EQ_SERVER_VER = "1.5.1"
+EQ_SERVER_VER = "1.5.2"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
