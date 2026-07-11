@@ -29,6 +29,32 @@ error()   { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 step()    { echo -e "\n${BOLD}${CYAN}>>> $*${NC}"; }
 
 # -----------------------------------------------------------------------------
+# Safety: detach every USB drive before ANY removal step runs.
+#
+# USB drives auto-mount INSIDE MPD's library (/var/lib/mpd/music/usb/<dev>).
+# If a drive is still mounted when a later step deletes /var/lib/mpd, `rm -rf`
+# would recurse into the mounted pendrive and erase the user's files — the drive
+# looks "formatted" afterwards. We MUST unmount first, no matter what. This runs
+# up front so the whole rest of the uninstall operates on a drive-free system.
+# -----------------------------------------------------------------------------
+detach_usb_drives() {
+  # Stop the per-device mount services (their ExecStop unmounts cleanly).
+  for unit in $(systemctl list-units --all --plain --no-legend 'squarepi-usb-mount@*' 2>/dev/null | awk '{print $1}'); do
+    systemctl stop "${unit}" 2>/dev/null || true
+  done
+  # Lazy-unmount EVERY filesystem mounted at or under /var/lib/mpd, deepest first.
+  # findmnt catches partition mounts, whole-disk mounts, and anything nested —
+  # so no drive can survive mounted into the tree we are about to delete.
+  if command -v findmnt >/dev/null 2>&1; then
+    while read -r mp; do
+      [[ -n "${mp}" ]] && umount -l "${mp}" 2>/dev/null || true
+    done < <(findmnt -rno TARGET 2>/dev/null | grep -E '^/var/lib/mpd(/|$)' | sort -r)
+  fi
+  # Belt-and-braces: unmount by the known mount pattern too.
+  umount -l /var/lib/mpd/music/usb/* 2>/dev/null || true
+}
+
+# -----------------------------------------------------------------------------
 # Banner
 # -----------------------------------------------------------------------------
 echo -e "${BOLD}"
@@ -80,6 +106,12 @@ if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
   info "Uninstall cancelled."
   exit 0
 fi
+
+# Detach any plugged-in USB drives NOW — before a single removal step runs — so
+# nothing later can ever delete files off a pendrive. See detach_usb_drives().
+step "Safely detaching any USB drives"
+detach_usb_drives
+success "USB drives detached (your pendrive files are safe)"
 
 # -----------------------------------------------------------------------------
 # 3. Stop and disable myMPD
@@ -170,7 +202,12 @@ fi
 echo ""
 read -r -p "  Remove MPD library cache and playlists? (/var/lib/mpd) [y/N] " REMOVE_DATA
 if [[ "${REMOVE_DATA}" =~ ^[Yy]$ ]]; then
-  rm -rf /var/lib/mpd
+  # Drives were already detached at startup, but re-run it in case one was
+  # plugged in during the uninstall. --one-file-system is the final safety net:
+  # it makes rm refuse to descend into ANY still-mounted filesystem, so a
+  # pendrive can never be cleared even if every unmount above somehow failed.
+  detach_usb_drives
+  rm -rf --one-file-system /var/lib/mpd
   rm -rf /var/log/mpd
   info "MPD data files removed"
 else
