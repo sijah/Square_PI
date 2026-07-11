@@ -58,7 +58,7 @@ detach_usb_drives() {
 # Banner
 # -----------------------------------------------------------------------------
 echo -e "${BOLD}"
-INSTALLER_VER="1.5.2"
+INSTALLER_VER="1.6.0"
 
 echo "  ╔══════════════════════════════════════════════╗"
 echo "  ║         SquarePi Software Uninstaller        ║"
@@ -338,6 +338,7 @@ rm -f /usr/local/bin/squarepi-eq-server.py
 rm -f /usr/local/bin/squarepi-eq-init.sh
 rm -f /etc/squarepi-initialized
 rm -f /var/lib/mympd/scripts/EQ*.lua
+rm -f /var/lib/mympd/scripts/Power_Restart.lua /var/lib/mympd/scripts/Power_Shutdown.lua
 systemctl daemon-reload
 info "EQ server, init service and preset scripts removed"
 

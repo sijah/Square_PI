@@ -8,12 +8,12 @@
 #
 #  Usage:
 #    sudo bash install.sh                 # MPD + myMPD + Bluetooth + EQ UI (default)
-#    sudo bash install.sh --without-bt    # skip Bluetooth
-#    sudo bash install.sh --without-eq    # skip the EQ web UI
 #    sudo bash install.sh --with-dlna --with-spotify --with-airplay
-#    sudo bash install.sh --all           # everything (BT, EQ, DLNA, Spotify, AirPlay)
+#    sudo bash install.sh --all           # everything (DLNA, Spotify, AirPlay too)
 #    sudo SQUAREPI_HOSTNAME=squarepi bash install.sh
 #    sudo SQUAREPI_BT_NAME="Kitchen SquarePi" bash install.sh
+#
+#  Bluetooth and the EQ web UI are core features — always installed, not optional.
 # =============================================================================
 
 set -euo pipefail
@@ -41,32 +41,28 @@ box_line() { printf "  ║ %-44.44s ║\n" "$*"; }
 # -----------------------------------------------------------------------------
 # Parse arguments
 # -----------------------------------------------------------------------------
-# Bluetooth and the EQ web UI are installed by default (the two defining features).
-# DLNA, Spotify, and AirPlay remain opt-in. Use --without-bt / --without-eq to skip.
+# Bluetooth and the EQ web UI are the two defining features — they are ALWAYS
+# installed and are not user-removable (no --without-bt / --without-eq). Only
+# DLNA, Spotify, and AirPlay are opt-in. --with-bt / --with-eq are accepted as
+# harmless no-ops for backward compatibility with older docs/scripts.
 INSTALL_BT=1
 INSTALL_EQ=1
 INSTALL_DLNA=0
 INSTALL_SPOTIFY=0
 INSTALL_AIRPLAY=0
 for arg in "$@"; do
-  # --with-bt / --with-eq are kept as no-op aliases for backward compatibility
-  [[ "$arg" == "--with-bt"      ]] && INSTALL_BT=1
-  [[ "$arg" == "--with-eq"      ]] && INSTALL_EQ=1
-  [[ "$arg" == "--without-bt"   ]] && INSTALL_BT=0
-  [[ "$arg" == "--without-eq"   ]] && INSTALL_EQ=0
   [[ "$arg" == "--with-dlna"    ]] && INSTALL_DLNA=1
   [[ "$arg" == "--with-spotify" ]] && INSTALL_SPOTIFY=1
   [[ "$arg" == "--with-airplay" ]] && INSTALL_AIRPLAY=1
   if [[ "$arg" == "--all" ]]; then
-    INSTALL_BT=1; INSTALL_EQ=1; INSTALL_DLNA=1
-    INSTALL_SPOTIFY=1; INSTALL_AIRPLAY=1
+    INSTALL_DLNA=1; INSTALL_SPOTIFY=1; INSTALL_AIRPLAY=1
   fi
 done
 
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.5.2"
+INSTALLER_VER="1.6.0"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -807,7 +803,7 @@ chmod 644 "${RELEASE_FILE}"
 success "Release metadata written to ${RELEASE_FILE}"
 
 # =============================================================================
-# BLUETOOTH A2DP SETUP (installed by default; skip with --without-bt)
+# BLUETOOTH A2DP SETUP (core feature — always installed)
 # =============================================================================
 if [[ $INSTALL_BT -eq 1 ]]; then
 
@@ -1128,7 +1124,7 @@ success "Group permissions set"
 fi  # end INSTALL_BT
 
 # =============================================================================
-# ADVANCED EQ WEB SERVER (installed by default; skip with --without-eq)
+# ADVANCED EQ WEB SERVER (core feature — always installed)
 # =============================================================================
 if [[ $INSTALL_EQ -eq 1 ]]; then
 

@@ -86,27 +86,24 @@ Accept the host key fingerprint when prompted.
 curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/install.sh | sudo bash
 ```
 
-The default install includes **Bluetooth and the visual DSP interface** alongside MPD, myMPD, EQ presets, and the sleep timer. DLNA, Spotify Connect, and AirPlay are opt-in.
+Every install includes **Bluetooth and the visual DSP interface** alongside MPD, myMPD, EQ presets, and the sleep timer — these are core features and can't be removed. DLNA, Spotify Connect, and AirPlay are opt-in.
 
 ### Flags
 
 | Command | Effect |
 |---|---|
 | *(no flags)* | MPD + myMPD + **Bluetooth** + **EQ UI** + presets + sleep timer |
-| `--without-bt` | Skip Bluetooth |
-| `--without-eq` | Skip the EQ web UI (myMPD EQ presets stay) |
 | `--with-dlna` | Add DLNA/UPnP renderer |
 | `--with-spotify` | Add Spotify Connect |
 | `--with-airplay` | Add AirPlay |
-| `--all` | Everything (BT, EQ, DLNA, Spotify, AirPlay) |
+| `--all` | Everything (+ DLNA, Spotify, AirPlay) |
 
-`--with-bt` / `--with-eq` are still accepted as no-op aliases. Mix and match freely:
+`--with-bt` / `--with-eq` are still accepted as harmless no-ops (BT and the EQ UI are always installed). Mix and match the opt-in flags freely:
 ```bash
 ... | sudo bash -s -- --with-dlna --with-airplay
-... | sudo bash -s -- --without-bt          # EQ UI but no Bluetooth
 ```
 
-If a BlueALSA package isn't available on your OS image, the installer warns and continues without Bluetooth — the core install never aborts.
+If a BlueALSA package isn't available on your OS image, the installer warns and continues — the core install never aborts.
 
 ### Clone and run locally (alternative)
 

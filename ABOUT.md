@@ -107,7 +107,7 @@ The installer:
 - Sets up Bluetooth and the visual DSP UI by default; adds DLNA, Spotify Connect, AirPlay on request
 - Sets hostname to `squarepi`, enables mDNS
 - Starts all services and verifies they are running
-- A reboot is required to load the audio driver; Bluetooth is on by default (skip with `--without-bt`)
+- A reboot is required to load the audio driver; Bluetooth and the EQ web UI are core features and always installed
 
 ---
 
@@ -167,6 +167,7 @@ Requires Raspberry Pi OS Lite — Bookworm (Debian 12) or Trixie (Debian 13).
 ```
 squarepi-installer/
   install.sh         — main installer (bash, self-contained)
+  update.sh          — in-place updater (preserves user settings)
   uninstall.sh       — clean uninstaller
   eq-server.py       — DSP web UI server (Python stdlib, port 8081)
 docs/

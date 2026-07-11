@@ -4,13 +4,17 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
-## [1.5.2] — 2026-07-12
+## [1.6.0] — 2026-07-12
+
+### Added
+- **In-place updater (`update.sh`).** Existing installs can move to a newer version without the destructive full reinstall: `git pull` then `sudo bash squarepi-installer/update.sh`. It applies only the deltas — Power control + latest EQ server, the shutdown-mute fix, the boot-ordering safety, the first-boot card-wait, the Digital Volume 0 dB ceiling, `replaygain off`, and the DKMS driver migration (only if the driver isn't already DKMS-managed). It **preserves** your saved EQ curve, your chosen Analog Gain, and your BT volume — it enforces safety ceilings and service fixes, never resets your levels. Idempotent and safe to re-run.
 
 ### Fixed
 - **Uninstaller aborted halfway through.** Run the documented way (`curl … | sudo bash`), stdin is the pipe, so the "Remove MPD library cache?" prompt hit instant EOF; under `set -e` the failing `read` killed the whole script right after MPD was removed — leaving the driver, boot overlay, EQ/Bluetooth/USB/DLNA/AirPlay/Spotify stack and release file behind. All remaining prompts now read from `/dev/tty` (with safe defaults, honouring `SQUAREPI_YES=1`), matching the initial confirmation prompt. A failing `apt-get update` during uninstall is also no longer fatal.
 - **Analog Gain stuck at 0 dB (full output) on first boot.** The first-boot init service ran too early — the DKMS-built TAS5805M card usually wasn't enumerated yet, so every `amixer` call failed silently, yet the service still marked first-boot done and never retried. Analog Gain was left at the chip power-up default (0 dB = maximum). Init now waits for the card and its `Analog Gain` control to appear before applying anything, and exits *without* marking done if the card never shows — so it retries on the next boot instead of leaving the amp at full output.
 
 ### Changed
+- **Bluetooth and the EQ web UI are now core, non-removable features.** They are the two things that define a SquarePi, so the `--without-bt` / `--without-eq` opt-outs have been removed — every install includes both. `--with-bt` / `--with-eq` are still accepted as harmless no-ops. DLNA, Spotify, and AirPlay remain opt-in. (The internal fail-soft still applies: if no BlueALSA package is available on the OS image, the installer warns and continues rather than aborting.)
 - **No un-vetted gain window at boot (defence in depth).** Analog gain only matters while I2S signal is flowing, and the only signal sources are MPD, Bluetooth, AirPlay, Spotify and DLNA. Every one of those services is now ordered **after** a safe-gain step: the first-boot init on first boot, and `alsactl restore` on every boot (previously only MPD waited for the gain restore). This closes the last paths where a source could play before the safe gain landed — the speakers can never blast at full output during startup.
 
 ---

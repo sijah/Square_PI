@@ -14,7 +14,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-EQ_SERVER_VER = "1.5.2"
+EQ_SERVER_VER = "1.6.0"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
@@ -143,17 +143,20 @@ def amixer_set(control, value):
 
 
 def amixer_get_int(control):
-    """Read raw integer ALSA value (works for any integer control)."""
-    out = _run(["amixer", "-c", CARD, "sget", control])
+    """Read raw integer ALSA value (works for any integer control).
+
+    Uses `cget` and reads the ": values=N" line — the authoritative value.
+    (The old `sget` parse scanned for "Playback" and wrongly matched the
+    "Limits: Playback 0 - 31" line, returning the range's lower bound instead
+    of the real value: Analog Gain 11 was read as 0 → shown as -15.5 dB.)"""
+    out = _run(["amixer", "-c", CARD, "cget", "name=" + control])
     for line in out.splitlines():
-        if "Playback" in line:
-            parts = line.split()
-            for i, p in enumerate(parts):
-                if p == "Playback" and i + 1 < len(parts):
-                    try:
-                        return int(parts[i + 1])
-                    except ValueError:
-                        pass
+        line = line.strip()
+        if line.startswith(": values="):
+            try:
+                return int(line.split("=", 1)[1].split(",")[0])
+            except (ValueError, IndexError):
+                pass
     return 0
 
 

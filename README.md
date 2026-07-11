@@ -1,6 +1,6 @@
 # SquarePi
 
-[![Version](https://img.shields.io/badge/installer-v1.5.2-blue)](https://github.com/sijah/Square_PI/releases)
+[![Version](https://img.shields.io/badge/installer-v1.6.0-blue)](https://github.com/sijah/Square_PI/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.com)
 [![Hardware](https://img.shields.io/badge/hardware-SquarePi-orange)](docs/audio-engine.md)
@@ -148,7 +148,7 @@ Green = clear. Red = active. All faults self-clear when the condition resolves.
 | Interface | Address | Notes |
 |---|---|---|
 | myMPD web UI | `http://squarepi.local:8080` · `https://squarepi.local:8443` | Mobile-optimised, always installed |
-| EQ DSP UI | `http://squarepi.local:8081` | Installed by default (skip with `--without-eq`) |
+| EQ DSP UI | `http://squarepi.local:8081` | Core feature — always installed |
 | MPD (music apps) | `squarepi.local:6600` | Auto-discovered by M.A.L.P, MPDroid, Cantata |
 | DLNA renderer | Appears as `SquarePi` in DLNA apps | With `--with-dlna` |
 
@@ -203,17 +203,9 @@ DLNA, Spotify Connect, and AirPlay are opt-in:
 ... | sudo bash -s -- --all
 ```
 
-### Skip a default feature
+Bluetooth and the EQ web UI are core features — they are always installed and can't be removed. Only DLNA, Spotify, and AirPlay are opt-in.
 
-```bash
-# Skip Bluetooth
-... | sudo bash -s -- --without-bt
-
-# Skip the EQ web UI (EQ presets in myMPD remain)
-... | sudo bash -s -- --without-eq
-```
-
-If a BlueALSA package isn't available on your OS image, the installer logs a warning and continues without Bluetooth — the core install never aborts.
+If a BlueALSA package isn't available on your OS image, the installer logs a warning and continues — the core install never aborts.
 
 ### Clone and run locally
 
@@ -221,9 +213,8 @@ If a BlueALSA package isn't available on your OS image, the installer logs a war
 git clone https://github.com/sijah/Square_PI.git
 cd Square_PI/squarepi-installer
 
-sudo bash install.sh                      # Bluetooth + EQ UI (default)
-sudo bash install.sh --all                # everything
-sudo bash install.sh --without-bt         # skip Bluetooth
+sudo bash install.sh                      # Bluetooth + EQ UI (always included)
+sudo bash install.sh --all                # everything (+ DLNA, Spotify, AirPlay)
 ```
 
 ### Optional: auto-reboot and custom hostname
@@ -377,7 +368,7 @@ Hardware designed in **KiCad**. PCB fabricated at **JLCPCB**.
 </details>
 
 <details>
-<summary>Bluetooth (default — skip with --without-bt)</summary>
+<summary>Bluetooth (core feature — always installed)</summary>
 
 | Component | Purpose |
 |---|---|
@@ -390,7 +381,7 @@ Hardware designed in **KiCad**. PCB fabricated at **JLCPCB**.
 </details>
 
 <details>
-<summary>EQ web UI (default — skip with --without-eq)</summary>
+<summary>EQ web UI (core feature — always installed)</summary>
 
 | Component | Purpose |
 |---|---|
@@ -561,6 +552,25 @@ Use UUID in `/etc/fstab`, include `uid=mpd,gid=audio` for FAT/exFAT, run `mpc up
 See [docs/setup.md](docs/setup.md) for full instructions.
 
 </details>
+
+---
+
+## Update
+
+Already running an older SquarePi? Update in place — this keeps your EQ curve, Analog Gain, and BT volume, and only applies the safety and feature fixes (no reinstall):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/update.sh | sudo bash
+```
+
+Or, if you cloned the repo:
+
+```bash
+cd Square_PI && git pull
+sudo bash squarepi-installer/update.sh
+```
+
+The updater is idempotent (safe to re-run) and non-destructive — your music, USB mounts, and audio settings are untouched.
 
 ---
 

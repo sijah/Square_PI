@@ -6,7 +6,7 @@ SquarePi accepts audio from seven sources. All are upscaled, resampled, and equa
 
 ## Bluetooth A2DP (installed by default)
 
-Wireless audio from any phone, tablet, or laptop. Installed by default — skip with `--without-bt`.
+Wireless audio from any phone, tablet, or laptop. A core feature — always installed.
 
 1. Open Bluetooth settings on your device
 2. Scan — **SquarePi** appears in the list
