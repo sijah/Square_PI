@@ -66,7 +66,7 @@ done
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.5.0"
+INSTALLER_VER="1.5.1"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -274,23 +274,47 @@ success "Core packages installed (mDNS via avahi-daemon enabled)"
 # -----------------------------------------------------------------------------
 # 8. Build and install TAS5805M kernel driver
 # -----------------------------------------------------------------------------
-step "Building TAS5805M kernel driver from source"
+step "Building TAS5805M kernel driver (DKMS — survives kernel updates)"
 
-TMP_DIR=$(mktemp -d)
-info "Cloning driver into ${TMP_DIR}"
-git clone --depth=1 "${TAS_DRIVER_REPO}" "${TMP_DIR}/tas5805m" 2>&1 | \
+apt-get install -y -qq dkms || \
+  warn "dkms install failed — driver won't auto-rebuild on kernel updates"
+
+DRV_NAME="tas58xx"
+DRV_VER="1.0"
+DRV_SRC="/usr/src/${DRV_NAME}-${DRV_VER}"
+
+# Idempotent: clear any previous DKMS registration and source tree before re-adding
+dkms remove -m "${DRV_NAME}" -v "${DRV_VER}" --all 2>/dev/null || true
+rm -rf "${DRV_SRC}"
+
+info "Cloning driver into ${DRV_SRC}"
+git clone --depth=1 "${TAS_DRIVER_REPO}" "${DRV_SRC}" 2>&1 | \
   grep -E "(Cloning|done)" || true
 
-cd "${TMP_DIR}/tas5805m"
-info "Compiling kernel module..."
-make all || error "Driver build failed"
-info "Installing kernel module..."
-make install || error "Driver install failed"
+# DKMS control file — the module is rebuilt automatically on every kernel update,
+# so an 'apt upgrade' that bumps the kernel no longer silently kills audio.
+cat > "${DRV_SRC}/dkms.conf" <<EOF
+PACKAGE_NAME="${DRV_NAME}"
+PACKAGE_VERSION="${DRV_VER}"
+BUILT_MODULE_NAME[0]="${DRV_NAME}"
+DEST_MODULE_LOCATION[0]="/updates"
+MAKE[0]="make KDIR=/lib/modules/\${kernelver}/build"
+CLEAN="make KDIR=/lib/modules/\${kernelver}/build clean"
+AUTOINSTALL="yes"
+EOF
+
+# Drop any module left by a previous non-DKMS install so DKMS's copy is authoritative
+find /lib/modules -path "*/kernel/*" -name "tas58xx.ko*" -delete 2>/dev/null || true
+
+info "Building + installing module via DKMS..."
+dkms add     -m "${DRV_NAME}" -v "${DRV_VER}" 2>/dev/null || true
+dkms build   -m "${DRV_NAME}" -v "${DRV_VER}" || error "DKMS build failed (check kernel headers)"
+dkms install -m "${DRV_NAME}" -v "${DRV_VER}" --force || error "DKMS install failed"
+
+# Device-tree overlay: the .dtbo lives in /boot and survives kernel updates (no DKMS needed)
 info "Compiling device tree overlay..."
-bash compile-overlay.sh || error "Device tree overlay build failed"
-cd /
-rm -rf "${TMP_DIR}"
-success "TAS5805M driver built and installed"
+( cd "${DRV_SRC}" && bash compile-overlay.sh ) || error "Device tree overlay build failed"
+success "TAS5805M driver installed via DKMS (auto-rebuilds on kernel updates)"
 
 # -----------------------------------------------------------------------------
 # 9. Configure /boot/firmware/config.txt
@@ -408,7 +432,10 @@ resampler {
     quality         "very high"
 }
 
-replaygain          "auto"
+# "off" = predictable level for every track. "auto" applied per-track tag gain,
+# which does nothing for untagged files and causes surprising jumps on tagged ones.
+# For true loudness normalisation, tag the library once with loudgain (see docs).
+replaygain          "off"
 volume_normalization "no"
 
 zeroconf_enabled    "yes"
@@ -579,6 +606,24 @@ done
 } > "${MYMPD_SCRIPTS_DIR}/Sleep_Cancel.lua"
 chmod 644 "${MYMPD_SCRIPTS_DIR}/Sleep_Cancel.lua"
 
+# Power control Lua scripts for myMPD — curl the eq-server /api/power endpoint,
+# which mutes the amp then reboots/shuts down (runs as root). Only useful when the
+# EQ web server is installed, so gate on INSTALL_EQ.
+# Long-bracket [[ ]] Lua strings let the JSON body keep its single quotes for the shell.
+if [[ $INSTALL_EQ -eq 1 ]]; then
+  cat > "${MYMPD_SCRIPTS_DIR}/Power_Restart.lua" <<'LUAEOF'
+-- {"order":18,"file":"","version":0,"arguments":[]}
+os.execute([[curl -s -X POST -H "Content-Type: application/json" -d '{"action":"restart"}' http://127.0.0.1:8081/api/power]])
+LUAEOF
+  chmod 644 "${MYMPD_SCRIPTS_DIR}/Power_Restart.lua"
+
+  cat > "${MYMPD_SCRIPTS_DIR}/Power_Shutdown.lua" <<'LUAEOF'
+-- {"order":19,"file":"","version":0,"arguments":[]}
+os.execute([[curl -s -X POST -H "Content-Type: application/json" -d '{"action":"shutdown"}' http://127.0.0.1:8081/api/power]])
+LUAEOF
+  chmod 644 "${MYMPD_SCRIPTS_DIR}/Power_Shutdown.lua"
+fi
+
 # Restart myMPD so it picks up the new scripts
 systemctl restart mympd 2>/dev/null || true
 success "EQ presets + sleep timer installed — find them in myMPD under Scripts"
@@ -675,6 +720,12 @@ BANDS=("00020 Hz" "00032 Hz" "00050 Hz" "00080 Hz" "00125 Hz" "00200 Hz"
 for b in "${BANDS[@]}"; do
   amixer -c "$CARD" sset "$b" 0 2>/dev/null || true
 done
+
+# Pin Digital Volume to 0 dB (value 103) and persist it. The chip default is already
+# 0 dB, but values above 103 apply up to +24 dB of digital boost (guaranteed clipping,
+# possible speaker damage). Anchoring it here fixes the safe ceiling deterministically.
+amixer -c "$CARD" cset "name=Digital Volume" 103 2>/dev/null || true
+
 alsactl store 2>/dev/null || true
 touch /etc/squarepi-initialized
 INITEOF

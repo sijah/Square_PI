@@ -4,6 +4,19 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.5.1] — 2026-07-05
+
+### Added
+- **Power control — restart and shut down from the UI.** The EQ web interface now has a **POWER** menu (Restart / Shut down) in the header, and myMPD gains two matching script tiles (`Power_Restart`, `Power_Shutdown`). Both mute the amp first — so the speakers don't thump when the TAS5805M loses its clock — then reboot or halt the Pi cleanly, giving a non-technical owner a safe way to power down instead of yanking the plug. Backed by a new `POST /api/power` endpoint on the EQ server (runs as root, so no sudo); the myMPD tiles `curl` it.
+
+### Fixed
+- **Driver now survives kernel updates (DKMS).** The TAS5805M module was built with a one-off `make install`, so any `apt upgrade` that bumped the kernel silently left the module behind on the next boot — dead audio, unrecoverable for a non-technical owner. It's now packaged with **DKMS** and rebuilds automatically on every kernel change. (The device-tree overlay already lived in `/boot` and was unaffected.)
+
+### Changed
+- **Gain-staging safety.** `Digital Volume` is now pinned to 0 dB (value 103) on first boot and persisted — values above that apply up to +24 dB of digital boost (guaranteed clipping, possible speaker damage). `replaygain` changed `auto` → `off` for predictable per-track levels (auto did nothing for untagged files and caused jumps on tagged ones). See the new gain-staging notes in [docs/audio-engine.md](docs/audio-engine.md); for real loudness normalisation, tag the library once with `loudgain`.
+
+---
+
 ## [1.5.0] — 2026-06-30
 
 ### Added

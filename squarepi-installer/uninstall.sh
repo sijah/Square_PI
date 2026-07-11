@@ -32,7 +32,7 @@ step()    { echo -e "\n${BOLD}${CYAN}>>> $*${NC}"; }
 # Banner
 # -----------------------------------------------------------------------------
 echo -e "${BOLD}"
-INSTALLER_VER="1.3.0"
+INSTALLER_VER="1.5.1"
 
 echo "  ╔══════════════════════════════════════════════╗"
 echo "  ║         SquarePi Software Uninstaller        ║"
@@ -62,7 +62,19 @@ echo ""
 echo "  Your music files will NOT be deleted."
 echo -e "${NC}"
 
-read -r -p "  Are you sure you want to continue? [y/N] " CONFIRM
+# Read the confirmation from the controlling terminal (/dev/tty), not stdin — so the
+# prompt works even when the script is piped in via `curl … | sudo bash` (where stdin
+# is the pipe, not the keyboard). SQUAREPI_YES=1 skips the prompt for automation.
+if [[ "${SQUAREPI_YES:-0}" == "1" ]]; then
+  CONFIRM="y"
+else
+  read -r -p "  Are you sure you want to continue? [y/N] " CONFIRM < /dev/tty 2>/dev/null || {
+    echo ""
+    warn "No terminal available to confirm (piped, non-interactive run)."
+    warn "Re-run in a terminal, download it first, or set SQUAREPI_YES=1 to skip this prompt."
+    exit 1
+  }
+fi
 if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
   echo ""
   info "Uninstall cancelled."
@@ -184,7 +196,16 @@ if lsmod | grep -q "^tas58xx"; then
     warn "Could not unload tas58xx — will be gone after reboot"
 fi
 
-# Try make uninstall first (cleanest — mirrors what make install did)
+# Remove the DKMS-managed driver (v1.5.1+ installs it via DKMS)
+if command -v dkms &>/dev/null; then
+  for ver in $(dkms status tas58xx 2>/dev/null | sed -n 's/^tas58xx[,/]\s*\([^,:]*\).*/\1/p'); do
+    dkms remove -m tas58xx -v "${ver}" --all 2>/dev/null && \
+      info "Removed DKMS module tas58xx/${ver}" || true
+  done
+  rm -rf /usr/src/tas58xx-* 2>/dev/null || true
+fi
+
+# Try make uninstall first (cleanest — mirrors what make install did) for pre-DKMS installs
 if command -v git &>/dev/null && command -v make &>/dev/null; then
   TMP_DIR=$(mktemp -d)
   info "Re-cloning driver to run make uninstall..."

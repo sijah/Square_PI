@@ -277,6 +277,38 @@ Restored at every boot by `squarepi-alsa-restore.service` (runs before MPD start
 
 ---
 
+## Gain staging & headroom
+
+Understanding where level is added and removed matters, because **boost stages sit after the volume control** — so it's possible to clip in ways the volume knob can't undo.
+
+The full chain, in order:
+
+```
+ReplayGain → MPD software volume → soxr → dmix (sums sources)
+   → [ TAS5805M:  Digital Volume → 15-band EQ → Analog Gain ] → speakers
+```
+
+Key facts:
+
+- **`Digital Volume` (ALSA `numid=1`, 0–127).** Value **103 = 0 dB (unity)** — this is the chip default and the safe ceiling. Each step is 0.5 dB; **127 = +24 dB**. SquarePi pins it to 103 on first boot and persists it. **Do not raise it past 103** — in `alsamixer` it shows as "81%", which tempts a push to 100% = +24 dB of digital gain = guaranteed clipping and possible speaker damage.
+- **EQ boost is applied *after* the volume control**, inside the chip. A large positive band (up to +15 dB) on hot content can overflow the biquad regardless of how low MPD's volume is set. Keep big boosts moderate, or trim **Analog Gain** down to reserve headroom.
+- **dmix sums simultaneous sources.** Two sources near full scale can sum past 0 dBFS. There is no hardware limiter — the TAS5805M's DRC is not exposed by the driver — so headroom is managed by keeping levels sensible, not by a brickwall.
+- **`Analog Gain`** (0 to −15.5 dB, default 0 dB) is the right place to set a **system ceiling**: pull it down a few dB to match the amp to your speakers so the useful volume range spreads across the whole knob instead of bunching at the bottom.
+
+### Loudness consistency across a mixed library
+
+SquarePi ships with `replaygain "off"` for predictable behaviour. If a music collection sounds inconsistent track-to-track (common with mixed-source MP3s that carry no gain tags), tag it once with **loudgain** — real EBU R128 normalisation:
+
+```bash
+sudo apt install loudgain
+loudgain -a -k -s e /var/lib/mpd/music/usb/*/**/*.mp3   # album mode, clip-safe
+mpc update
+```
+
+Then set `replaygain "album"` (or `"track"`) in `/etc/mpd.conf` and restart MPD to use the tags.
+
+---
+
 ## Hardware DSP specifications
 
 | Parameter | Value |

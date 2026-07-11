@@ -14,7 +14,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-EQ_SERVER_VER = "1.5.0"
+EQ_SERVER_VER = "1.5.1"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
@@ -174,6 +174,25 @@ def amixer_set_enum(control, value):
         ["amixer", "-c", CARD, "sset", control, value],
         stderr=subprocess.DEVNULL
     )
+
+
+def power_off_or_reboot(action):
+    """Mute the amp, then reboot or shut the Pi down.
+
+    eq-server runs as root, so systemctl needs no sudo. The amp is muted first
+    (Analog Gain to 0) so the speakers don't thump when the TAS5805M loses its
+    I2S clock as the system halts. The actual halt is deferred ~1s on a
+    background thread so the HTTP response reaches the browser before systemd
+    tears the server down.
+    """
+    amixer_set("Analog Gain", 0)
+    cmd = "reboot" if action == "restart" else "poweroff"
+
+    def _halt():
+        time.sleep(1)
+        subprocess.run(["systemctl", cmd], stderr=subprocess.DEVNULL)
+
+    threading.Thread(target=_halt, daemon=True).start()
 
 
 def get_faults():
@@ -389,6 +408,14 @@ HTML = r"""<!DOCTYPE html>
   .preset-sel-top { background:var(--pan); color:var(--txt); border:1px solid var(--bdr); border-radius:3px; padding:5px 10px; font-size:0.57rem; font-family:inherit; letter-spacing:0.06em; cursor:pointer; outline:none; }
   .tb-icon { font-size:0.9rem; color:var(--mut); cursor:pointer; padding:4px 5px; }
   .tb-icon:hover { color:var(--txt); }
+  .pwr-wrap { position:relative; }
+  .pwr-btn { color:var(--red); border-color:var(--red); }
+  .pwr-btn:hover { background:var(--red); color:#fff; }
+  .pwr-menu { display:none; position:absolute; right:0; top:calc(100% + 4px); flex-direction:column; gap:3px; min-width:132px; padding:4px; background:var(--pan); border:1px solid var(--bdr); border-radius:4px; box-shadow:0 6px 18px rgba(0,0,0,0.5); z-index:50; }
+  .pwr-menu.open { display:flex; }
+  .pwr-menu button { background:transparent; color:var(--txt); border:none; text-align:left; padding:7px 10px; font-family:inherit; font-size:0.6rem; letter-spacing:0.06em; cursor:pointer; border-radius:3px; }
+  .pwr-menu button:hover { background:var(--sur); }
+  .pwr-menu button.danger:hover { background:var(--red); color:#fff; }
 
   /* 3-column shell */
   .columns { display:grid; grid-template-columns:160px 1fr; overflow:hidden; min-height:0; }
@@ -609,6 +636,13 @@ HTML = r"""<!DOCTYPE html>
       <option value="acoustic">Acoustic</option>
     </select>
     <span class="tb-icon" title="Save to chip" onclick="saveSettings()">&#9211;</span>
+    <div class="pwr-wrap">
+      <button class="tb-btn pwr-btn" title="Power" onclick="togglePowerMenu(event)">&#9211;&nbsp;POWER</button>
+      <div class="pwr-menu" id="pwr-menu">
+        <button onclick="powerAction('restart')">&#8635;&nbsp;&nbsp;Restart</button>
+        <button class="danger" onclick="powerAction('shutdown')">&#9211;&nbsp;&nbsp;Shut down</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -886,6 +920,29 @@ function showStatus(msg) {
   el.textContent = msg;
   if (msg) setTimeout(() => { el.textContent = ''; }, 3000);
 }
+
+// ── Power (Restart / Shut down) ───────────────────────────────────────────────────
+function togglePowerMenu(e){
+  if (e) e.stopPropagation();
+  document.getElementById('pwr-menu').classList.toggle('open');
+}
+function powerAction(action){
+  const label = action === 'restart' ? 'Restart' : 'Shut down';
+  document.getElementById('pwr-menu').classList.remove('open');
+  if (!confirm(label + ' SquarePi now?')) return;
+  showStatus(label + '…');
+  post('/api/power', {action}).then(() => {
+    showStatus(action === 'restart'
+      ? 'Restarting — this page reconnects in ~30 s'
+      : 'Shutting down — wait for activity to stop, then unplug');
+  }).catch(() => showStatus(label + ' failed'));
+}
+// Close the power menu on any outside click
+document.addEventListener('click', (ev) => {
+  const menu = document.getElementById('pwr-menu');
+  if (menu && menu.classList.contains('open') && !ev.target.closest('.pwr-wrap'))
+    menu.classList.remove('open');
+});
 
 // ── Unsaved indicator ───────────────────────────────────────────────────────────
 let suppressDirty = true;   // true during initial load so loadState() doesn't flag dirty
@@ -1587,6 +1644,14 @@ class Handler(BaseHTTPRequestHandler):
             CUSTOM_PRESETS.pop(name, None)
             save_custom_presets(CUSTOM_PRESETS)
             self._json({"ok": True, "customs": CUSTOM_PRESETS})
+
+        elif p == "/api/power":
+            action = data.get("action")
+            if action not in ("restart", "shutdown"):
+                self._json({"ok": False, "error": "invalid action"}, status=400)
+            else:
+                power_off_or_reboot(action)
+                self._json({"ok": True, "action": action})
 
         else:
             self.send_response(404)
