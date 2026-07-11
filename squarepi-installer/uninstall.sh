@@ -94,7 +94,13 @@ echo -e "${NC}"
 if [[ "${SQUAREPI_YES:-0}" == "1" ]]; then
   CONFIRM="y"
 else
-  read -r -p "  Are you sure you want to continue? [y/N] " CONFIRM < /dev/tty 2>/dev/null || {
+  # Print the prompt ourselves (to stdout) rather than via `read -p`: read writes
+  # its -p prompt to STDERR, and we must redirect the read's stderr to /dev/null to
+  # keep the `|| { … }` fallback quiet when /dev/tty is absent — that redirect would
+  # otherwise swallow the prompt text too, leaving the user staring at a blank,
+  # seemingly-frozen cursor.
+  printf "  Are you sure you want to continue? [y/N] "
+  read -r CONFIRM < /dev/tty 2>/dev/null || {
     echo ""
     warn "No terminal available to confirm (piped, non-interactive run)."
     warn "Re-run in a terminal, download it first, or set SQUAREPI_YES=1 to skip this prompt."
@@ -207,7 +213,8 @@ echo ""
 if [[ "${SQUAREPI_YES:-0}" == "1" ]]; then
   REMOVE_DATA="n"
 else
-  read -r -p "  Remove MPD library cache and playlists? (/var/lib/mpd) [y/N] " REMOVE_DATA < /dev/tty 2>/dev/null || REMOVE_DATA="n"
+  printf "  Remove MPD library cache and playlists? (/var/lib/mpd) [y/N] "
+  read -r REMOVE_DATA < /dev/tty 2>/dev/null || REMOVE_DATA="n"
 fi
 if [[ "${REMOVE_DATA}" =~ ^[Yy]$ ]]; then
   # Drives were already detached at startup, but re-run it in case one was
@@ -500,7 +507,8 @@ echo ""
 if [[ "${SQUAREPI_YES:-0}" == "1" ]]; then
   REBOOT_NOW="n"
 else
-  read -r -p "  Reboot now? [y/N] " REBOOT_NOW < /dev/tty 2>/dev/null || REBOOT_NOW="n"
+  printf "  Reboot now? [y/N] "
+  read -r REBOOT_NOW < /dev/tty 2>/dev/null || REBOOT_NOW="n"
 fi
 if [[ "${REBOOT_NOW}" =~ ^[Yy]$ ]]; then
   echo ""
