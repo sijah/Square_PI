@@ -638,7 +638,7 @@ HTML = r"""<!DOCTYPE html>
       <option value="hiphop">Hip-Hop</option>
       <option value="acoustic">Acoustic</option>
     </select>
-    <span class="tb-icon" title="Save to chip" onclick="saveSettings()">&#9211;</span>
+    <span class="tb-icon" title="Save to chip" onclick="saveSettings()">&#128190;</span>
     <div class="pwr-wrap">
       <button class="tb-btn pwr-btn" title="Power" onclick="togglePowerMenu(event)">&#9211;&nbsp;POWER</button>
       <div class="pwr-menu" id="pwr-menu">
