@@ -287,6 +287,19 @@ info "Cloning driver into ${DRV_SRC}"
 git clone --depth=1 "${TAS_DRIVER_REPO}" "${DRV_SRC}" 2>&1 | \
   grep -E "(Cloning|done)" || true
 
+# The stock overlay hardcodes ti,mixer-mode = <0> (Stereo). The driver only
+# registers the runtime "Mixer Mode" + "Mixer L2L/R2L/L2R/R2R Gain" ALSA
+# controls when that property is ABSENT from the device tree (its own source
+# comment: "If set, individual mixer sliders are hidden from ALSA") — so with
+# the stock overlay, the EQ UI's Output Mode panel (Stereo/Mono/Left/Right +
+# custom matrix) has no controls to talk to and silently does nothing.
+# Removing the line doesn't change the boot-time default — the driver's
+# no-DT-property fallback is also Stereo (l2l=0dB, r2l=muted, l2r=muted,
+# r2r=0dB) — it just also exposes the controls so they become adjustable.
+if [[ -f "${DRV_SRC}/tas58xx-overlay.dts" ]]; then
+  sed -i '/^\s*ti,mixer-mode\s*=\s*<0>;\s*$/d' "${DRV_SRC}/tas58xx-overlay.dts"
+fi
+
 # DKMS control file — the module is rebuilt automatically on every kernel update,
 # so an 'apt upgrade' that bumps the kernel no longer silently kills audio.
 cat > "${DRV_SRC}/dkms.conf" <<EOF

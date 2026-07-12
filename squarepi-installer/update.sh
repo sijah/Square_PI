@@ -407,6 +407,34 @@ EOF
   fi
 fi
 
+# -----------------------------------------------------------------------------
+# 8b. Unlock the EQ UI's Mixer Mode / matrix controls. The stock overlay
+#     hardcodes ti,mixer-mode = <0> (Stereo), which per the driver's own
+#     source makes it hide the "Mixer Mode" and "Mixer L2L/R2L/L2R/R2R Gain"
+#     ALSA controls entirely — so the EQ UI's Output Mode panel has had
+#     nothing to talk to. Removing that line doesn't change the boot-time
+#     default (the driver's no-DT-property fallback is also Stereo), it just
+#     also exposes the controls. Requires a REBOOT to take effect — overlays
+#     only load at boot, this can't be hot-applied to the running kernel.
+# -----------------------------------------------------------------------------
+DRV_SRC="/usr/src/tas58xx-1.0"
+if [[ -f "${DRV_SRC}/tas58xx-overlay.dts" ]]; then
+  step "Unlocking Mixer Mode controls (Stereo/Mono/Left/Right + matrix)"
+  if grep -qE '^\s*ti,mixer-mode\s*=\s*<0>;\s*$' "${DRV_SRC}/tas58xx-overlay.dts"; then
+    sed -i '/^\s*ti,mixer-mode\s*=\s*<0>;\s*$/d' "${DRV_SRC}/tas58xx-overlay.dts"
+    if ( cd "${DRV_SRC}" && bash compile-overlay.sh ) 2>/dev/null; then
+      success "Mixer Mode controls unlocked — REBOOT REQUIRED for the EQ UI's Output Mode to work"
+      MIXER_UNLOCKED=1
+    else
+      warn "Overlay recompile failed — Mixer Mode stays locked (existing audio still works)"
+    fi
+  else
+    info "Mixer Mode already unlocked — nothing to do"
+  fi
+else
+  info "Driver source not found at ${DRV_SRC} — skipping Mixer Mode unlock (re-run after the DKMS driver is installed)"
+fi
+
 APPLIED+=(
   "Power control + latest EQ web server"
   "Shutdown-mute persistence fix (squarepi-eq.service + stock alsa-restore.service)"
@@ -415,6 +443,9 @@ APPLIED+=(
   "Digital Volume 0 dB ceiling + replaygain off"
   "DKMS driver check/migration"
 )
+if [[ "${MIXER_UNLOCKED:-0}" == "1" ]]; then
+  APPLIED+=("Mixer Mode controls unlocked (Stereo/Mono/Left/Right + matrix) — needs a reboot")
+fi
 
 else
   info "v1.6.0 delta already applied (installed version ${CURRENT_VER}) — skipping"
@@ -476,7 +507,11 @@ fi
 echo ""
 echo -e "  ${BOLD}Preserved:${NC} your EQ curve, Analog Gain, and BT volume."
 echo ""
-echo -e "  ${YELLOW}A reboot is recommended so the new service ordering takes effect.${NC}"
+if [[ "${MIXER_UNLOCKED:-0}" == "1" ]]; then
+  echo -e "  ${YELLOW}A reboot is REQUIRED for the Mixer Mode controls to appear${NC} (device tree overlays only load at boot)."
+else
+  echo -e "  ${YELLOW}A reboot is recommended so the new service ordering takes effect.${NC}"
+fi
 echo ""
 if [[ "${SQUAREPI_YES:-0}" == "1" ]]; then
   REBOOT_NOW="n"
