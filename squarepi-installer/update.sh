@@ -2,23 +2,53 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 sijah
 # =============================================================================
-#  SquarePi Updater  →  v1.6.0
-#  Brings an existing SquarePi install (1.5.x) up to v1.6.0 IN PLACE,
-#  without the destructive full reinstall. It applies only the deltas:
-#    • Power control + latest EQ web server
-#    • Shutdown-mute-persistence fix (drop ExecStop=alsactl store)
-#    • Boot-ordering safety (gain applied before every audio source)
-#    • First-boot init hardening (waits for the card)
-#    • Gain-staging ceiling (Digital Volume ≤ 0 dB) + replaygain off
-#    • DKMS driver migration (only if the driver isn't already under DKMS)
+#  SquarePi Updater — brings ANY older SquarePi install up to the latest
+#  release IN PLACE, without the destructive full reinstall.
+#
+#  This script is CUMULATIVE, not a one-shot migration for a single version
+#  pair. It is fetched fresh from `main` on every run (see README's `curl |
+#  sudo bash` one-liner), so whatever is the latest committed version of this
+#  file is what every user — cloned or not — runs. That only stays true if
+#  every release adds its deltas here instead of replacing them. See
+#  "ADDING THE NEXT RELEASE'S DELTA" below before editing this file.
 #
 #  What it PRESERVES (never resets): your saved EQ curve, your chosen Analog
 #  Gain, and your BT volume. It only enforces safety ceilings and service fixes.
 #
-#  Idempotent — safe to run more than once.
+#  Idempotent — safe to run more than once, and safe to run from ANY older
+#  installed version straight to the latest (every step below checks system
+#  state before acting, not the installed version number — so skipping
+#  releases is fine).
 #
 #  Usage:
 #    sudo bash update.sh
+#
+# =============================================================================
+#  ADDING THE NEXT RELEASE'S DELTA (do this every time you cut a release)
+# =============================================================================
+#  1. Bump TARGET_VER below to the new version. This is the only line that
+#     MUST change every release.
+#  2. Add a new "### vX.Y.Z DELTA" block further down, just above the
+#     "ALWAYS-LAST STEPS" marker near the bottom of this file. Copy the
+#     v1.6.0 block's shape exactly:
+#       if version_lt "${CURRENT_VER}" "vX.Y.Z"; then
+#         ...your steps, each ALSO guarded on system state (unit_exists,
+#         grep -q, a control's current value, dkms status)...
+#         APPLIED+=("bullet describing what this block did" ...)
+#       else
+#         info "vX.Y.Z delta already applied ... — skipping"
+#       fi
+#     The outer version_lt gate means an install already past vX.Y.Z skips
+#     the whole block on every future run (fast) instead of re-checking it
+#     forever; the inner state guards are a second layer that self-heals if
+#     something in here ever got reverted by hand. Both layers matter.
+#  3. Do NOT delete, rewrite, or renumber a prior release's DELTA block. An
+#     install that skipped straight from 1.5.2 to the new version still needs
+#     every block in between to run — each one's own version_lt gate decides
+#     for itself whether it's still needed.
+#  4. If the change is user-visible, it belongs in APPLIED (shows in the
+#     "Applied:" summary automatically — no separate list to maintain) plus
+#     the changelog/README update section.
 # =============================================================================
 
 set -euo pipefail
@@ -28,7 +58,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
-TARGET_VER="1.6.0"
+TARGET_VER="1.6.0"  # <-- bump this every release (see guide above)
 CARD="LouderRaspberry"
 RELEASE_FILE="/etc/squarepi-release"
 EQ_SERVER_DEST="/usr/local/bin/squarepi-eq-server.py"
@@ -75,11 +105,49 @@ success "Running as root"
 CURRENT_VER="unknown"
 if [[ -f "${RELEASE_FILE}" ]]; then
   CURRENT_VER="$(sed -n 's/^VERSION=//p' "${RELEASE_FILE}" | head -n1)"
-  info "Installed version: ${CURRENT_VER:-unknown}  →  updating to ${TARGET_VER}"
+  [[ -z "${CURRENT_VER}" ]] && CURRENT_VER="unknown"
 else
   warn "${RELEASE_FILE} not found — this doesn't look like a SquarePi install."
   warn "If this is a fresh system, run install.sh instead. Continuing anyway (best effort)."
 fi
+
+# -----------------------------------------------------------------------------
+# 1b. Check whether an update is actually needed, and ask before touching
+#     anything. `version_lt A B` is true when A is strictly older than B
+#     (GNU sort -V, present on Raspberry Pi OS / Debian). "unknown" always
+#     counts as older than any real version, so a fresh/undetected install
+#     runs every delta block below. This same helper is what each release's
+#     delta block is gated on further down — see the guide above.
+# -----------------------------------------------------------------------------
+version_lt() {
+  [[ "$1" == "unknown" ]] && return 0
+  [[ "$1" != "$2" ]] && [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]]
+}
+
+# Bullet lines actually applied this run — each gated delta block below
+# appends to this; the closing summary prints only what really happened.
+APPLIED=()
+
+if ! version_lt "${CURRENT_VER}" "${TARGET_VER}"; then
+  success "Already up to date — installed version is ${CURRENT_VER} (latest is ${TARGET_VER})"
+  info "Nothing to do. Exiting."
+  exit 0
+fi
+
+echo ""
+echo -e "  ${BOLD}Update available:${NC} ${CURRENT_VER} → ${GREEN}${TARGET_VER}${NC}"
+echo ""
+if [[ "${SQUAREPI_YES:-0}" == "1" ]]; then
+  info "SQUAREPI_YES=1 — proceeding without prompting"
+else
+  printf "  Update SquarePi to v${TARGET_VER} now? [Y/n] "
+  read -r DO_UPDATE < /dev/tty 2>/dev/null || DO_UPDATE="n"
+  if [[ "${DO_UPDATE}" =~ ^[Nn]$ ]]; then
+    info "Update cancelled — nothing was changed."
+    exit 0
+  fi
+fi
+info "Updating ${CURRENT_VER} → ${TARGET_VER}"
 
 # Source the new eq-server.py / repo files from the local checkout when present
 # (a `git pull` on the Pi gives you the newest ones); otherwise fetch from GitHub.
@@ -92,9 +160,18 @@ fetch_repo_file() {  # fetch_repo_file <name> <dest>
   fi
 }
 
-# -----------------------------------------------------------------------------
-# 2. Update the EQ web server (Power control + latest UI + version)
-# -----------------------------------------------------------------------------
+# =============================================================================
+# ### v1.6.0 DELTA — in-place updater, mandatory BT/EQ, EQ gain-read fix
+# ### (released 2026-07-12; brings any 1.5.x install forward)
+# ###
+# ### Gated on version, not just internal state: an install already at 1.6.0+
+# ### skips this whole block on every future run instead of re-checking/
+# ### re-writing units it already fixed. (The internal unit_exists/grep -q/
+# ### dkms-status guards inside stay too, as a second layer — self-healing if
+# ### something in here ever got reverted by hand.)
+# =============================================================================
+if version_lt "${CURRENT_VER}" "1.6.0"; then
+
 if [[ -f "${EQ_SERVER_DEST}" ]] || unit_exists squarepi-eq.service; then
   step "Updating EQ web server"
   if fetch_repo_file "eq-server.py" "${EQ_SERVER_DEST}"; then
@@ -309,6 +386,32 @@ EOF
   fi
 fi
 
+APPLIED+=(
+  "Power control + latest EQ web server"
+  "Shutdown-mute persistence fix"
+  "Boot ordering — gain applied before every source"
+  "First-boot init hardened (card-wait)"
+  "Digital Volume 0 dB ceiling + replaygain off"
+  "DKMS driver check/migration"
+)
+
+else
+  info "v1.6.0 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v1.6.0 gate ---
+
+# =============================================================================
+# ### END v1.6.0 DELTA
+# ###
+# ### >>> The next release's "### vX.Y.Z DELTA" block goes HERE, above this
+# ###     line. Do not add new steps below — steps 9-10 below must always run
+# ###     last, after every release's delta has been applied. <<<
+# =============================================================================
+
+# =============================================================================
+# ALWAYS-LAST STEPS — run after every delta block above, every release.
+# =============================================================================
+
 # -----------------------------------------------------------------------------
 # 9. Reload units + restart the services we touched
 # -----------------------------------------------------------------------------
@@ -341,13 +444,14 @@ echo "  ╔═══════════════════════
 echo "  ║        Update to v${TARGET_VER} complete!            ║"
 echo "  ╚══════════════════════════════════════════════╝"
 echo -e "${NC}"
-echo -e "  ${BOLD}Applied:${NC}"
-echo -e "    ✓ Power control + latest EQ web server"
-echo -e "    ✓ Shutdown-mute persistence fix"
-echo -e "    ✓ Boot ordering — gain applied before every source"
-echo -e "    ✓ First-boot init hardened (card-wait)"
-echo -e "    ✓ Digital Volume 0 dB ceiling + replaygain off"
-echo -e "    ✓ DKMS driver check/migration"
+if [[ ${#APPLIED[@]} -gt 0 ]]; then
+  echo -e "  ${BOLD}Applied:${NC}"
+  for line in "${APPLIED[@]}"; do
+    echo -e "    ✓ ${line}"
+  done
+else
+  echo -e "  ${BOLD}Applied:${NC} nothing new — every delta was already in place."
+fi
 echo ""
 echo -e "  ${BOLD}Preserved:${NC} your EQ curve, Analog Gain, and BT volume."
 echo ""

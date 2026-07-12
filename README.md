@@ -570,7 +570,7 @@ cd Square_PI && git pull
 sudo bash squarepi-installer/update.sh
 ```
 
-The updater is idempotent (safe to re-run) and non-destructive — your music, USB mounts, and audio settings are untouched.
+The updater checks your installed version first — if you're already current it exits with nothing changed; otherwise it shows what's changing and asks for confirmation before applying anything (set `SQUAREPI_YES=1` to skip the prompt). It's idempotent (safe to re-run), non-destructive — your music, USB mounts, and audio settings are untouched — and always brings an older install straight to the newest release, however many versions behind it is.
 
 ---
 
