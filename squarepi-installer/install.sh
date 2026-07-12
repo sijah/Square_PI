@@ -1194,6 +1194,20 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
+# Mask the STOCK alsa-utils alsa-restore.service. It ships with
+# ExecStop=alsactl store — udev activates it as soon as the sound card
+# appears, it stays active (RemainAfterExit) until shutdown, and on every
+# halt/reboot systemd stops it, firing that ExecStop and capturing whatever
+# the mixer happens to be at that instant. The Power-menu mutes Analog Gain
+# to 0 (-15.5 dB) right before halting (see squarepi-eq.service above) —
+# so the stock service was silently storing that transient mute and
+# restoring the amp near-silent on the next boot, exactly the bug already
+# fixed for squarepi-eq.service's own ExecStop in v1.5.1, via a second,
+# unrelated path. squarepi-alsa-restore.service above already fully
+# replaces its restore-on-boot job (with correct producer ordering), so
+# masking the stock one is pure redundant-risk removal, no functional loss.
+systemctl mask alsa-restore.service 2>/dev/null || true
+
 systemctl daemon-reload
 systemctl enable squarepi-alsa-restore
 systemctl enable squarepi-eq

@@ -199,6 +199,27 @@ if unit_exists squarepi-eq.service; then
 fi
 
 # -----------------------------------------------------------------------------
+# 3b. Mask the STOCK alsa-utils alsa-restore.service — same bug as above via
+#     a second, unrelated path. It ships ExecStop=alsactl store; udev starts
+#     it as soon as the sound card appears and it stays active until
+#     shutdown, so its ExecStop fires on every halt/reboot and silently
+#     captures the transient Power-menu mute, restoring the amp near-silent
+#     on the next boot. squarepi-alsa-restore.service already fully replaces
+#     its restore-on-boot job (with correct producer ordering), so masking
+#     the stock one is pure redundant-risk removal.
+# -----------------------------------------------------------------------------
+if unit_exists squarepi-alsa-restore.service; then
+  step "Masking stock alsa-restore.service (was storing the shutdown mute)"
+  MASK_STATE="$(systemctl is-enabled alsa-restore.service 2>/dev/null || true)"
+  if [[ "${MASK_STATE}" == "masked" ]]; then
+    info "alsa-restore.service already masked — nothing to do"
+  else
+    systemctl mask alsa-restore.service 2>/dev/null || true
+    success "Masked alsa-restore.service — Analog Gain will no longer come back muted after restart/shutdown"
+  fi
+fi
+
+# -----------------------------------------------------------------------------
 # 4. Boot-ordering safety — gain must land before ANY audio source can play.
 #    Rewrite alsa-restore + eq-init units to the canonical v1.6.0 ordering.
 #    Only rewrite units that already exist (some older installs may lack the EQ UI).
@@ -388,7 +409,7 @@ fi
 
 APPLIED+=(
   "Power control + latest EQ web server"
-  "Shutdown-mute persistence fix"
+  "Shutdown-mute persistence fix (squarepi-eq.service + stock alsa-restore.service)"
   "Boot ordering — gain applied before every source"
   "First-boot init hardened (card-wait)"
   "Digital Volume 0 dB ceiling + replaygain off"
