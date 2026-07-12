@@ -6,7 +6,7 @@ This guide covers everything from a blank SD card to music playing through your 
 
 ## What you need
 
-- Raspberry Pi Zero 2W, 3B+, or 4B (Pi 5 in development)
+- Raspberry Pi Zero 2W, 3B+, or 4B (Pi 5 not yet supported — the installer detects Pi 5 and refuses to run)
 - SquarePi HAT
 - SD card (8GB minimum, 16GB+ recommended)
 - 12–24V DC power supply, barrel jack (3A minimum at 12V)
@@ -122,12 +122,13 @@ sudo bash install.sh
 5. Installs myMPD and starts it on port 8080
 6. Writes all 13 EQ preset Lua scripts to myMPD
 7. Writes sleep timer scripts (30/60/90 min + cancel) to myMPD
-8. Sets MPD volume to 25% (safe first-boot default)
-9. Installs a first-boot EQ init service (sets all 15 bands to 0 dB, then disables itself)
-10. Installs Bluetooth and the EQ server by default; DLNA, Spotify, AirPlay when requested
-11. Sets up USB auto-mount (udev + systemd) so drives mount on insert
-12. Verifies myMPD responds on port 8080
-13. Writes install metadata to `/etc/squarepi-release`
+8. Writes Power control scripts (Restart / Shut down) to myMPD
+9. Sets MPD volume to 25% (safe first-boot default)
+10. Installs a first-boot EQ init service (sets all 15 bands to 0 dB and Analog Gain to −10 dB, runs once)
+11. Installs Bluetooth and the EQ server by default; DLNA, Spotify, AirPlay when requested
+12. Sets up USB auto-mount (udev + systemd) so drives mount on insert
+13. Verifies myMPD responds on port 8080
+14. Writes install metadata to `/etc/squarepi-release`
 
 ---
 
@@ -185,6 +186,8 @@ If your browser redirects to HTTPS, use `https://squarepi.local:8443` and accept
 ```
 http://squarepi.local:8081
 ```
+
+The DSP interface also has a **Power menu** (top right) for Restart / Shut down — it mutes the amp before halting so there's no speaker thump. The same two actions are installed as `Power_Restart` / `Power_Shutdown` tiles in myMPD under Scripts.
 
 ---
 
@@ -280,13 +283,14 @@ journalctl -u mpd -n 50
 mpc status
 ```
 
-If ALSA card name differs from expected:
+MPD's `audio_output` device is normally `"squarepi_mix"` (the shared dmix/BT mixer set up during Bluetooth install), not a raw `plughw:` device. If ALSA card name differs from expected:
 ```bash
 aplay -l    # note actual card name
-sudo nano /etc/mpd.conf
-# update: device "plughw:<card-name>,0"
+sudo nano /etc/asound.conf
+# update the slave.pcm "hw:LouderRaspberry,0" line inside pcm.squarepi_mix
 sudo systemctl restart mpd
 ```
+Only edit `/etc/mpd.conf`'s `device` line directly if Bluetooth failed to install and MPD is still pointed at `plughw:<card-name>,0`.
 
 ### myMPD not loading
 

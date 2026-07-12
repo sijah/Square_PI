@@ -42,7 +42,7 @@ One install command sets up the audio driver, music player, web UI, Bluetooth, D
 | **Internet Radio** | Built-in streaming, hundreds of stations, no extra app |
 | **MPD clients** | Any MPD-compatible app on any OS auto-discovers SquarePi |
 
-All sources can be active simultaneously — ALSA dmix mixes them at the hardware layer.
+Bluetooth, DLNA, USB, Radio, and MPD clients all share the output via ALSA dmix and can play at the same time. Spotify Connect and AirPlay are the exception — starting either one pauses MPD (so it won't fight with USB/Radio/DLNA playback), though it still layers fine with Bluetooth.
 
 ---
 
@@ -111,13 +111,14 @@ Open `http://squarepi.local:8081` for the full real-time DSP control panel.
 - **Balance** — L/R pan
 - **Mixer Mode** — `Stereo` / `Mono` / `Left` / `Right` (crossfeed matrix via separate L2L / R2L / L2R / R2R gain controls)
 - **Save to chip** — settings survive power cycles (`alsactl store`)
+- **Power menu** — Restart / Shut down the Pi from the UI (mutes the amp first, then halts); the same two actions are also available as one-tap tiles in myMPD under Scripts
 
 Plus a few quality-of-life touches:
 
 - **Colour themes** — six palettes (Amber, Studio Blue, Phosphor Green, McIntosh Blue, Graphite, and a Daylight light mode); your choice is remembered per browser
 - **Now playing** — the current track shows at the top, from MPD or from Bluetooth when the phone sends track info
 - **A/B compare** — store two EQ curves and flip between them to compare by ear
-- **Unsaved indicator** — flags when the live EQ differs from what's saved to the chip
+- **Unsaved indicator** — flags when the live DSP settings (EQ, Gain, Balance, or Mixer Mode) differ from what's saved to the chip
 - **Preset sparklines** — each preset button shows a mini preview of its curve shape
 
 Terminal access via `alsamixer` → `F6` → `LouderRaspberry`.
@@ -136,6 +137,7 @@ Live readout from TAS5805M chip registers — available in the DSP UI (installed
 | Left / Right Channel DC | DC fault — amp protection triggered |
 | PVDD Undervoltage / Overvoltage | Supply voltage out of range |
 | Clock | I2S clock fault |
+| OTP CRC Error | Internal config error |
 | Over Temperature Shutdown | Chip too hot, output disabled |
 | Warning 112°C / 122°C / 134°C / 146°C | Thermal warning thresholds |
 
@@ -171,7 +173,7 @@ Built into every install — find in myMPD → **Scripts**:
 
 ### Requirements
 
-- Raspberry Pi (Zero 2W · 3B+ · 4B · Pi 5 in development)
+- Raspberry Pi (Zero 2W · 3B+ · 4B — Pi 5 not yet supported, installer refuses to run on it)
 - Raspberry Pi OS Lite — Bookworm (Debian 12) or Trixie (Debian 13)
 - SquarePi HAT connected
 - Internet connection on the Pi
@@ -237,7 +239,7 @@ aplay -l    # should show LouderRaspberry
 
 Open myMPD: `http://squarepi.local:8080`
 
-> **First boot defaults:** Volume at 25%. EQ initialised to flat (all bands 0 dB).
+> **First boot defaults:** Volume at 25%. EQ initialised to flat (all bands 0 dB). Analog Gain set to −10 dB (not 0 dB) so the very first playback is a moderate level, never a full-output blast on unfamiliar speakers — raise it in the EQ UI once you know your speakers can take it.
 
 [Full setup guide with OS flashing, first boot, and troubleshooting →](docs/setup.md)
 
@@ -342,7 +344,7 @@ Hardware designed in **KiCad**. PCB fabricated at **JLCPCB**.
 | Pi Zero 2W | Primary target — tested, recommended |
 | Pi 3B+ | Tested |
 | Pi 4B | Tested |
-| Pi 5 | In development |
+| Pi 5 | Not yet supported — installer detects Pi 5 and refuses to install |
 
 ---
 
@@ -477,11 +479,7 @@ journalctl -u mpd -n 50
 mpc status
 ```
 
-If ALSA card name differs from `LouderRaspberry`, update `/etc/mpd.conf`:
-
-```conf
-device "plughw:<card-name>,0"
-```
+MPD's `audio_output` device is normally `"squarepi_mix"` (the shared dmix/BT mixer), not a raw `plughw:` device — Bluetooth setup switches it during install. If ALSA card name differs from `LouderRaspberry`, edit the `slave.pcm "hw:LouderRaspberry,0"` line inside `/etc/asound.conf` instead of `/etc/mpd.conf`. Only change `/etc/mpd.conf`'s `device` line directly if Bluetooth failed to install and MPD is still pointed at `plughw:<card-name>,0`.
 
 </details>
 

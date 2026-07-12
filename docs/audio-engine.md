@@ -122,26 +122,50 @@ Hardware audio devices are exclusive-access by default — only one application 
 
 ### How it works
 
-ALSA dmix is configured as a virtual PCM device in `/etc/asound.conf`:
+ALSA dmix is configured as a virtual PCM device in `/etc/asound.conf` (written by install.sh as part of Bluetooth setup):
 
 ```conf
 pcm.squarepi_mix {
-    type dmix
-    ipc_key 1024
+    type plug
     slave {
-        pcm         "hw:LouderRaspberry,0"
-        rate        48000
-        format      S32_LE
-        period_size 4096
-        buffer_size 65536
+        pcm {
+            type dmix
+            ipc_key 1025
+            ipc_perm 0666
+            slave {
+                pcm "hw:LouderRaspberry,0"
+                rate 48000
+                format S32_LE
+                period_size 4096
+                buffer_size 65536
+            }
+        }
     }
 }
-pcm.!default squarepi_mix
+
+pcm.squarepi_bt_vol {
+    type softvol
+    slave.pcm "squarepi_mix"
+    control {
+        name "BT Volume"
+        card LouderRaspberry
+    }
+    min_dB -40.0
+    max_dB 0.0
+    resolution 100
+}
+
+pcm.!default {
+    type plug
+    slave.pcm "squarepi_mix"
+}
 ```
 
 - **rate / format**: All sources are mixed at 48kHz S32_LE — this is why upscaling and resampling must run first
 - **period_size / buffer_size**: Sized large (65536 frames) to prevent underruns when multiple heavy sources (MPD + Bluetooth) play simultaneously
 - **ipc_key**: Shared memory key used by ALSA for inter-process coordination
+- **type plug wrapper**: `squarepi_mix` and the `!default` PCM are both `plug`-wrapped around the real `dmix`/target PCM so that clients requesting a different rate/format than 48kHz/S32_LE get transparently converted instead of failing to open the device
+- **squarepi_bt_vol**: a softvol PCM sitting between bluealsa-aplay and `squarepi_mix` that exposes the `BT Volume` mixer control described below — see "Bluetooth audio path"
 
 All audio applications — MPD, BlueALSA (Bluetooth), upmpdcli (DLNA), shairport-sync (AirPlay) — write to `squarepi_mix`. The dmix layer sums all streams in real time and feeds a single stream to the hardware.
 
@@ -185,7 +209,7 @@ amixer -c LouderRaspberry cset "name=BT Volume" 50
 
 ### Multiple simultaneous sources
 
-The dmix layer supports many simultaneous writers. Multiple Bluetooth devices, MPD clients, DLNA, and AirPlay can all produce audio at the same time without interrupting each other.
+The dmix layer supports many simultaneous writers, and Bluetooth, MPD (which also carries USB, Internet Radio, and DLNA — DLNA bridges to MPD, it isn't a separate audio path), can all produce audio at the same time without interrupting each other. Spotify Connect and AirPlay are the exception: `squarepi-spotify-event.sh` and `squarepi-airplay-event.sh` each run `mpc pause` when a session starts, so starting Spotify or AirPlay pauses whatever MPD was playing (they still play alongside Bluetooth, which nothing pauses).
 
 ---
 
@@ -290,10 +314,14 @@ ReplayGain → MPD software volume → soxr → dmix (sums sources)
 
 Key facts:
 
-- **`Digital Volume` (ALSA `numid=1`, 0–127).** Value **103 = 0 dB (unity)** — this is the chip default and the safe ceiling. Each step is 0.5 dB; **127 = +24 dB**. SquarePi pins it to 103 on first boot and persists it. **Do not raise it past 103** — in `alsamixer` it shows as "81%", which tempts a push to 100% = +24 dB of digital gain = guaranteed clipping and possible speaker damage.
+- **`Digital Volume` (ALSA `numid=1`, 0–127).** Value **103 = 0 dB (unity)** — this is the chip default and the safe ceiling. SquarePi pins it to 103 on first boot and persists it. **Do not raise it past 103** — in `alsamixer` it shows as "81%", which tempts a push to 100%, and values above 103 apply positive digital gain up to a maximum of +24 dB at value 127 (guaranteed clipping and possible speaker damage at the top of that range; note this does not work out to an even 0.5 dB/step across the full 0–127 range — treat 103 as the ceiling, not a starting point for math).
 - **EQ boost is applied *after* the volume control**, inside the chip. A large positive band (up to +15 dB) on hot content can overflow the biquad regardless of how low MPD's volume is set. Keep big boosts moderate, or trim **Analog Gain** down to reserve headroom.
 - **dmix sums simultaneous sources.** Two sources near full scale can sum past 0 dBFS. There is no hardware limiter — the TAS5805M's DRC is not exposed by the driver — so headroom is managed by keeping levels sensible, not by a brickwall.
-- **`Analog Gain`** (0 to −15.5 dB, default 0 dB) is the right place to set a **system ceiling**: pull it down a few dB to match the amp to your speakers so the useful volume range spreads across the whole knob instead of bunching at the bottom.
+- **`Analog Gain`** (0 to −15.5 dB, chip power-up default 0 dB — but SquarePi's first-boot script pins it to **−10 dB** as a safety margin, see below) is the right place to set a **system ceiling**: pull it down a few dB to match the amp to your speakers so the useful volume range spreads across the whole knob instead of bunching at the bottom.
+
+### First-boot Analog Gain
+
+`squarepi-eq-init.service` sets `Analog Gain` to value 11 (−10 dB) the first time the audio card comes up, instead of leaving it at the chip's 0 dB power-up default — so the very first playback on unfamiliar speakers is a moderate level, not a full-output blast. This runs once (guarded by `/etc/squarepi-initialized`); after that, whatever you set in the EQ UI persists and is never overridden again.
 
 ### Loudness consistency across a mixed library
 

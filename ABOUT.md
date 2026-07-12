@@ -34,7 +34,7 @@ Rate conversion uses **SoXR** — a polyphase resampling library used in profess
 Multiple simultaneous sources — Bluetooth from a phone and DLNA from a laptop at the same time — share the output via ALSA dmix at 48kHz / S32_LE. No source pauses another.
 
 ### SquarePi EQ™
-15-band parametric EQ running inside the TAS5805M chip over I²C. The Pi CPU handles no audio processing for equalization. 13 built-in presets, full manual control via browser, settings saved across power cycles. The browser interface adds six colour themes, a draggable response curve, a now-playing strip, A/B curve comparison, and live fault monitoring.
+15-band parametric EQ running inside the TAS5805M chip over I²C. The Pi CPU handles no audio processing for equalization. 13 built-in presets, full manual control via browser, settings saved across power cycles. The browser interface adds six colour themes, a draggable response curve, a now-playing strip, A/B curve comparison, live fault monitoring, and a Power menu (Restart / Shut down, also available as myMPD Scripts tiles).
 
 ---
 
@@ -126,7 +126,7 @@ It started as a personal project: a compact, good-sounding amp board for a Raspb
 | Pi Zero 2W | Primary target — tested, recommended |
 | Pi 3B+ | Tested |
 | Pi 4B | Tested |
-| Pi 5 | In development |
+| Pi 5 | Not yet supported — installer detects Pi 5 and refuses to install |
 
 Requires Raspberry Pi OS Lite — Bookworm (Debian 12) or Trixie (Debian 13).
 
@@ -141,7 +141,7 @@ Requires Raspberry Pi OS Lite — Bookworm (Debian 12) or Trixie (Debian 13).
 | Account required | **None** | Sonos account | Amazon account |
 | Data collection | **None** | Yes | Yes |
 | Subscription | **None** | Some features | Some features |
-| Protocols | **7 simultaneous** | Limited | Limited |
+| Protocols | **7** (BT/DLNA/USB/Radio/MPD play concurrently; Spotify & AirPlay pause MPD while active) | Limited | Limited |
 | EQ | **15-band hardware DSP** | 3-band app sliders | 3-band app sliders |
 | 48kHz/24-bit upscaling | **SquarePi Upscaler™** | No | No |
 | Open source | **Fully (GPLv3)** | No | No |
