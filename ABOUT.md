@@ -12,7 +12,7 @@ SquarePi is an open-source Raspberry Pi HAT that turns any Pi into a 2×30W hi-f
 
 ## What It Is
 
-SquarePi is a custom PCB — designed from scratch in KiCad, fabricated at JLCPCB — that plugs onto a Raspberry Pi's 40-pin GPIO header and turns it into a complete headless hi-fi music player.
+SquarePi is a custom PCB — designed from scratch in KiCad — that plugs onto a Raspberry Pi's 40-pin GPIO header and turns it into a complete headless hi-fi music player.
 
 The board is built around the Texas Instruments TAS5805M: a Class-D amplifier with a full hardware DSP built in. That chip alone handles 2×30W of output power plus 15-band parametric EQ, DRC, and gain control — all over I²C, zero extra hardware.
 
@@ -53,7 +53,7 @@ Multiple simultaneous sources — Bluetooth from a phone and DLNA from a laptop 
 | Board | 65×61mm, 2-layer, standard RPi 40-pin HAT |
 | Power input | 12–24V DC, barrel jack (powers Pi too — no separate Pi power supply needed) |
 | Parts cost | Under $30 |
-| Design | KiCad, fabricated JLCPCB |
+| Design | KiCad |
 
 ---
 

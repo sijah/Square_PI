@@ -330,7 +330,7 @@ Designed for heatsink-less operation. For long-term reliability:
 
 ### Design Files
 
-Hardware designed in **KiCad**. PCB fabricated at **JLCPCB**.
+Hardware designed in **KiCad**.
 
 - Gerbers, BOM, KiCad project: [GitHub Releases](https://github.com/sijah/Square_PI/releases)
 - Driver: [sonocotta/tas5805m-driver-for-raspbian](https://github.com/sonocotta/tas5805m-driver-for-raspbian)
