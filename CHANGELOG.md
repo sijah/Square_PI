@@ -4,6 +4,13 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.6.1] — 2026-07-14
+
+### Fixed
+- **EQ web UI was unusable on phone-width screens.** The main content column and the 15-band EQ grid used CSS Grid `1fr` tracks, which by default won't shrink below their content's minimum width; the unshrinkable EQ rack forced the whole content column ~200px wider than the viewport. Because the page also disables all scrolling (`overflow:hidden` on `html`/`body`) as its normal desktop layout, that overflow was invisible rather than reachable — on a phone this clipped the **POWER** button (and Restart/Shut down with it) off the top bar entirely, along with the EQ card's **ON/OFF**, **SAVE EQ**, **RESET** and **BYPASS** controls, and 4 of the 15 EQ bands (3.15k–16k). `.content` now has `min-width:0` so it stops fighting the viewport; below 680px width the top bar and the EQ fader rack each get their own horizontal scroll region instead of clipping, and the EQ card's header buttons wrap onto additional lines (already-present `flex-wrap` just wasn't being reached). Also added `touch-action:none` to the per-band fader sliders, matching the frequency-response curve, so dragging a fader on a touchscreen can't be hijacked by the page's scroll gesture.
+
+---
+
 ## [1.6.0] — 2026-07-12
 
 ### Added

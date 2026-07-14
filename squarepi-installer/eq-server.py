@@ -14,7 +14,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-EQ_SERVER_VER = "1.6.0"
+EQ_SERVER_VER = "1.6.1"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
@@ -438,7 +438,7 @@ HTML = r"""<!DOCTYPE html>
   .s-dot { display:inline-block; width:5px; height:5px; border-radius:50%; background:var(--grn); box-shadow:0 0 4px var(--grn); margin-right:5px; vertical-align:middle; }
 
   /* Main content */
-  .content { overflow-y:auto; padding:9px 11px; background:var(--bg); }
+  .content { overflow-y:auto; overflow-x:hidden; min-width:0; padding:9px 11px; background:var(--bg); }
 
   /* Cards */
   .card { background:var(--bg); border:1px solid var(--bdr); border-left:2px solid var(--acc-dim); border-radius:5px; margin-bottom:8px; overflow:hidden; }
@@ -499,6 +499,7 @@ HTML = r"""<!DOCTYPE html>
     transform:rotate(-90deg);
     width:140px; height:28px;
     cursor:pointer; background:transparent; outline:none; z-index:2;
+    touch-action:none;
   }
   input.vsl::-webkit-slider-runnable-track { height:4px; background:transparent; border-radius:2px; }
   input.vsl::-webkit-slider-thumb {
@@ -592,7 +593,24 @@ HTML = r"""<!DOCTYPE html>
   .pre-btn.active .pre-spark path { stroke:#000; }
 
   /* Responsive */
-  @media (max-width:680px) { .columns { grid-template-columns:1fr; } .sidebar { display:none; } }
+  @media (max-width:680px) {
+    .columns { grid-template-columns:1fr; }
+    .sidebar { display:none; }
+
+    /* Top bar: brand subtitle is the first thing to go; whatever still
+       doesn't fit scrolls horizontally instead of clipping off-screen
+       (buttons like POWER must stay reachable, not just visible-on-desktop). */
+    .topbar { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    .topbar-brand { width:auto; }
+    .brand-sub { display:none; }
+
+    /* 15-band EQ rack: don't let grid tracks fight the viewport down to
+       illegible slivers. Give every band a fixed usable width and let the
+       rack scroll horizontally instead — same trade-off phone graphic-EQ
+       apps make. */
+    .eq-rack { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    .eq-grid { grid-template-columns:repeat(15,44px); width:max-content; }
+  }
 </style>
 </head>
 <body>
