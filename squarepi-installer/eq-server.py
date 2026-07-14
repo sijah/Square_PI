@@ -9,16 +9,25 @@ Port 8081. Pure Python stdlib — no pip dependencies.
 
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-EQ_SERVER_VER = "1.6.1"
+EQ_SERVER_VER = "1.6.2"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
 BT_VOL_FILE = "/var/lib/squarepi/bt_volume"
+
+RELEASE_FILE = "/etc/squarepi-release"
+# Releases aren't published as GitHub Releases (releases/latest returns a stale
+# pre-1.0 entry) — every version is a plain pushed tag, so read those instead.
+GITHUB_TAGS_URL = "https://api.github.com/repos/sijah/Square_PI/tags?per_page=30"
+UPDATE_CHECK_INTERVAL = 24 * 3600
 
 # ── EQ bands ──────────────────────────────────────────────────────────────────
 # (display label, amixer control name)
@@ -207,6 +216,91 @@ def get_faults():
     return result
 
 
+# ── Host health (Pi-side, separate from the amp's own hardware faults above) ────
+def _systemctl_is_active(unit):
+    try:
+        out = subprocess.run(["systemctl", "is-active", unit],
+                              capture_output=True, text=True, timeout=2)
+        return out.stdout.strip() == "active"
+    except Exception:
+        return False
+
+
+def _check_amp_card():
+    try:
+        with open("/proc/asound/cards") as f:
+            return "ok" if CARD in f.read() else "err"
+    except OSError:
+        return "err"
+
+
+def _check_disk_space():
+    try:
+        usage = shutil.disk_usage("/")
+        free_pct = usage.free / usage.total * 100
+        if free_pct < 5:
+            return "err"
+        if free_pct < 15:
+            return "warn"
+        return "ok"
+    except OSError:
+        return "na"
+
+
+def _check_wifi_signal():
+    try:
+        with open("/proc/net/wireless") as f:
+            lines = f.readlines()[2:]  # first two lines are headers
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            quality = float(parts[2].rstrip("."))
+            if quality < 20:
+                return "err"
+            if quality < 35:
+                return "warn"
+            return "ok"
+        return "na"  # no wireless interface — likely a wired install
+    except OSError:
+        return "na"
+
+
+def _check_bt_adapter():
+    """Same ObjectManager iteration BlueZ pattern as _bt_now_playing() —
+    doesn't assume the adapter is at /org/bluez/hci0."""
+    try:
+        import dbus
+        bus = dbus.SystemBus()
+        mgr = dbus.Interface(bus.get_object("org.bluez", "/"),
+                             "org.freedesktop.DBus.ObjectManager")
+        for _path, ifaces in mgr.GetManagedObjects(timeout=1.0).items():
+            adapter = ifaces.get("org.bluez.Adapter1")
+            if adapter:
+                return "ok" if bool(adapter.get("Powered")) else "err"
+        return "err"
+    except Exception:
+        return "na"
+
+
+HOST_HEALTH_CHECKS = [
+    ("amp_card",     "DSP Card Detected",        _check_amp_card),
+    ("disk_space",   "SD Card Space",            _check_disk_space),
+    ("wifi_signal",  "WiFi Signal",              _check_wifi_signal),
+    ("bt_adapter",   "Bluetooth Adapter",        _check_bt_adapter),
+    ("svc_mpd",      "Music Player (MPD)",       lambda: "ok" if _systemctl_is_active("mpd.service") else "err"),
+    ("svc_bluealsa", "Bluetooth Audio",          lambda: "ok" if _systemctl_is_active("bluealsa.service") else "err"),
+    ("svc_btaplay",  "Bluetooth Playback",       lambda: "ok" if _systemctl_is_active("bluealsa-aplay.service") else "err"),
+    ("svc_avahi",    "Network Discovery (mDNS)", lambda: "ok" if _systemctl_is_active("avahi-daemon") else "err"),
+]
+
+
+def get_host_health():
+    """Pi-side health: driver/card, disk, WiFi, BT adapter, core services.
+    Each check fails soft to 'na' or 'err', never raises."""
+    return {key: fn() for key, _, fn in HOST_HEALTH_CHECKS}
+
+
 def get_balance():
     """
     Read balance from Channel L/R Gain.
@@ -355,6 +449,64 @@ def get_now_playing():
     return _mpd_now_playing() or _bt_now_playing() or {"playing": False}
 
 
+# ── Update check (notify-only — never runs update.sh itself) ────────────────────
+_UPDATE_INFO = {"current": None, "latest": None, "update_available": False}
+
+
+def _version_tuple(v):
+    try:
+        return tuple(int(p) for p in v.strip().lstrip("v").split("."))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _read_installed_version():
+    try:
+        with open(RELEASE_FILE) as f:
+            for line in f:
+                if line.startswith("VERSION="):
+                    return line.strip().split("=", 1)[1]
+    except OSError:
+        pass
+    return None
+
+
+def _fetch_latest_version():
+    try:
+        req = urllib.request.Request(
+            GITHUB_TAGS_URL,
+            headers={"User-Agent": "SquarePi-EQ-Server/" + EQ_SERVER_VER},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            tags = json.loads(resp.read().decode())
+        versions = [(_version_tuple(t.get("name", "")), t.get("name", "").lstrip("v"))
+                    for t in tags]
+        versions = [v for v in versions if v[0]]
+        return max(versions)[1] if versions else None
+    except (urllib.error.URLError, ValueError, OSError):
+        return None
+
+
+def _refresh_update_info():
+    """Best-effort refresh of _UPDATE_INFO. Never raises — a failed check just
+    leaves the previous (possibly still-None) values in place."""
+    current = _read_installed_version()
+    latest = _fetch_latest_version()
+    current_v = _version_tuple(current) if current else None
+    latest_v = _version_tuple(latest) if latest else None
+    _UPDATE_INFO.update({
+        "current": current,
+        "latest": latest,
+        "update_available": bool(current_v and latest_v and latest_v > current_v),
+    })
+
+
+def _update_check_thread():
+    while True:
+        _refresh_update_info()
+        time.sleep(UPDATE_CHECK_INTERVAL)
+
+
 def get_state():
     """Return all DSP state in one call."""
     bands = {label: amixer_get(ctrl) for label, ctrl in BANDS}
@@ -372,6 +524,7 @@ def get_state():
             "r2r": amixer_get_int(MATRIX_CONTROLS["r2r"]),
         },
         "faults": get_faults(),
+        "health": get_host_health(),
     }
 
 
@@ -409,8 +562,6 @@ HTML = r"""<!DOCTYPE html>
   .tb-btn { background:var(--pan); color:var(--txt); border:1px solid var(--bdr); border-radius:3px; padding:5px 11px; font-size:0.57rem; font-family:inherit; letter-spacing:0.08em; cursor:pointer; }
   .tb-btn:hover { border-color:var(--acc); color:var(--acc); }
   .preset-sel-top { background:var(--pan); color:var(--txt); border:1px solid var(--bdr); border-radius:3px; padding:5px 10px; font-size:0.57rem; font-family:inherit; letter-spacing:0.06em; cursor:pointer; outline:none; }
-  .tb-icon { font-size:0.9rem; color:var(--mut); cursor:pointer; padding:4px 5px; }
-  .tb-icon:hover { color:var(--txt); }
   .pwr-wrap { position:relative; }
   .pwr-btn { color:var(--red); border-color:var(--red); }
   .pwr-btn:hover { background:var(--red); color:#fff; }
@@ -419,6 +570,14 @@ HTML = r"""<!DOCTYPE html>
   .pwr-menu button { background:transparent; color:var(--txt); border:none; text-align:left; padding:7px 10px; font-family:inherit; font-size:0.6rem; letter-spacing:0.06em; cursor:pointer; border-radius:3px; }
   .pwr-menu button:hover { background:var(--sur); }
   .pwr-menu button.danger:hover { background:var(--red); color:#fff; }
+
+  .upd-wrap { position:relative; }
+  .upd-btn { color:var(--grn); border-color:var(--grn); }
+  .upd-btn:hover { background:var(--grn); color:#000; }
+  .upd-menu { display:none; position:absolute; right:0; top:calc(100% + 4px); flex-direction:column; gap:6px; width:230px; padding:10px; background:var(--pan); border:1px solid var(--bdr); border-radius:4px; box-shadow:0 6px 18px rgba(0,0,0,0.5); z-index:50; }
+  .upd-menu.open { display:flex; }
+  .upd-hdr { font-size:0.6rem; color:var(--txt); letter-spacing:0.04em; line-height:1.5; }
+  .upd-cmd { display:block; background:var(--sur); color:var(--label); border:1px solid var(--bdr); border-radius:3px; padding:6px 8px; font-size:0.55rem; font-family:inherit; word-break:break-all; user-select:all; }
 
   /* 3-column shell */
   .columns { display:grid; grid-template-columns:160px 1fr; overflow:hidden; min-height:0; }
@@ -549,6 +708,7 @@ HTML = r"""<!DOCTYPE html>
   .fdot { width:8px; height:8px; border-radius:50%; background:var(--grn); box-shadow:0 0 5px var(--grn); flex-shrink:0; transition:all 0.3s; }
   .fdot.warn { background:var(--acc); box-shadow:0 0 5px var(--acc); }
   .fdot.err { background:var(--red); box-shadow:0 0 5px var(--red); animation:blink 1s infinite; }
+  .fdot.na { background:var(--mut); box-shadow:none; }
   .fault-name { font-size:0.58rem; color:var(--label); text-align:center; line-height:1.3; }
 
   .save-row { display:flex; align-items:center; gap:12px; }
@@ -639,7 +799,7 @@ HTML = r"""<!DOCTYPE html>
       <option value="graphite">Graphite</option>
       <option value="daylight">Daylight</option>
     </select>
-    <button class="tb-btn" onclick="saveSettings()">SAVE</button>
+    <button class="tb-btn" onclick="saveSettings()" title="Commit current gain/balance/EQ/mixer settings so they survive a reboot">SAVE TO CHIP</button>
     <select class="preset-sel-top" onchange="if(this.value){applyPreset(this.value);this.value=''}">
       <option value="">PRESETS &#9660;</option>
       <option value="flat">Flat</option>
@@ -656,7 +816,13 @@ HTML = r"""<!DOCTYPE html>
       <option value="hiphop">Hip-Hop</option>
       <option value="acoustic">Acoustic</option>
     </select>
-    <span class="tb-icon" title="Save to chip" onclick="saveSettings()">&#128190;</span>
+    <div class="upd-wrap" id="upd-wrap" style="display:none">
+      <button class="tb-btn upd-btn" title="Update available" onclick="toggleUpdateMenu(event)">&#8593;&nbsp;UPDATE</button>
+      <div class="upd-menu" id="upd-menu">
+        <div class="upd-hdr">v<span id="upd-latest"></span> is available &mdash; you're on v<span id="upd-current"></span>. SSH in and run:</div>
+        <code class="upd-cmd">curl -fsSL https://raw.githubusercontent.com/sijah/Square_PI/main/squarepi-installer/update.sh | sudo bash</code>
+      </div>
+    </div>
     <div class="pwr-wrap">
       <button class="tb-btn pwr-btn" title="Power" onclick="togglePowerMenu(event)">&#9211;&nbsp;POWER</button>
       <div class="pwr-menu" id="pwr-menu">
@@ -765,7 +931,6 @@ HTML = r"""<!DOCTYPE html>
         <option value="hiphop">Hip-Hop</option>
         <option value="acoustic">Acoustic</option>
       </select>
-      <button class="action-btn" onclick="saveCustomPreset()">SAVE EQ</button>
       <button class="action-btn danger" onclick="applyPreset('flat')">RESET</button>
       <button class="action-btn bypass" id="bypass-btn" onclick="toggleBypass()">BYPASS</button>
     </div>
@@ -789,7 +954,7 @@ HTML = r"""<!DOCTYPE html>
     </div>
     <div class="custom-save-row">
       <input type="text" id="custom-name" maxlength="24" placeholder="Custom preset name…">
-      <button class="save-btn" onclick="saveCustomPreset()">&#9632; Save EQ</button>
+      <button class="save-btn" onclick="saveCustomPreset()" title="Save this curve as a new preset button below — doesn't affect what survives a reboot">&#9632; Save as preset</button>
     </div>
     <div class="eq-wrap">
       <div class="eq-curve-wrap">
@@ -900,8 +1065,9 @@ HTML = r"""<!DOCTYPE html>
     </div>
     <div class="faults-section-title">Fault Monitor</div>
     <div class="faults-grid" id="faults-grid"></div>
+    <div class="faults-section-title">Host Health</div>
+    <div class="faults-grid" id="health-grid"></div>
     <div class="save-row">
-      <button class="save-btn" onclick="saveSettings()">&#9632; Save to chip (survive reboot)</button>
       <span class="status" id="status"></span>
     </div>
   </div>
@@ -916,6 +1082,7 @@ HTML = r"""<!DOCTYPE html>
 <script>
 const BANDS = __BAND_LABELS__;
 const FAULT_DEFS = __FAULT_DEFS__;
+const HEALTH_DEFS = __HEALTH_DEFS__;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function dbStr(v) {
@@ -963,7 +1130,22 @@ document.addEventListener('click', (ev) => {
   const menu = document.getElementById('pwr-menu');
   if (menu && menu.classList.contains('open') && !ev.target.closest('.pwr-wrap'))
     menu.classList.remove('open');
+  const umenu = document.getElementById('upd-menu');
+  if (umenu && umenu.classList.contains('open') && !ev.target.closest('.upd-wrap'))
+    umenu.classList.remove('open');
 });
+
+// ── Update check (notify-only) ──────────────────────────────────────────────────
+function toggleUpdateMenu(e){
+  if (e) e.stopPropagation();
+  document.getElementById('upd-menu').classList.toggle('open');
+}
+fetch('/api/update-check').then(r => r.json()).then(d => {
+  if (!d.update_available) return;
+  document.getElementById('upd-latest').textContent = d.latest;
+  document.getElementById('upd-current').textContent = d.current || '?';
+  document.getElementById('upd-wrap').style.display = '';
+}).catch(() => {});
 
 // ── Unsaved indicator ───────────────────────────────────────────────────────────
 let suppressDirty = true;   // true during initial load so loadState() doesn't flag dirty
@@ -1398,12 +1580,14 @@ function setMatrixDisplay(matrix) {
 }
 
 // ── Faults ─────────────────────────────────────────────────────────────────────
-function updateHealthLed(faults) {
+function updateHealthLed(faults, health) {
   const led = document.getElementById('sys-health-led');
   const txt = document.getElementById('sys-health-txt');
   if (!led || !faults) return;
-  const hasErr  = FAULT_DEFS.filter(f => !f.warn).some(f => faults[f.key]);
-  const hasWarn = FAULT_DEFS.filter(f =>  f.warn).some(f => faults[f.key]);
+  const hasErr  = FAULT_DEFS.filter(f => !f.warn).some(f => faults[f.key])
+    || (health && HEALTH_DEFS.some(h => health[h.key] === 'err'));
+  const hasWarn = FAULT_DEFS.filter(f =>  f.warn).some(f => faults[f.key])
+    || (health && HEALTH_DEFS.some(h => health[h.key] === 'warn'));
   if (hasErr)       { led.className = 'sys-led err';  txt.textContent = 'Fault detected'; }
   else if (hasWarn) { led.className = 'sys-led warn'; txt.textContent = 'Warning'; }
   else              { led.className = 'sys-led';       txt.textContent = 'All systems OK'; }
@@ -1438,6 +1622,24 @@ function updateFaults(faults) {
     dot.className = 'fdot' + (v === 0 ? '' : (f.warn ? ' warn' : ' err'));
   });
 }
+function healthDotClass(status) {
+  return status === 'ok' ? '' : status === 'na' ? ' na' : status === 'warn' ? ' warn' : ' err';
+}
+function buildHealth(health) {
+  const grid = document.getElementById('health-grid');
+  grid.innerHTML = '';
+  HEALTH_DEFS.forEach(h => {
+    const st = health ? (health[h.key] ?? 'na') : 'na';
+    grid.innerHTML += `<div class="fault-item"><span class="fdot${healthDotClass(st)}" id="hd-${h.key}"></span><span class="fault-name">${h.label}</span></div>`;
+  });
+}
+function updateHealth(health) {
+  HEALTH_DEFS.forEach(h => {
+    const dot = document.getElementById('hd-' + h.key);
+    if (!dot) return;
+    dot.className = 'fdot' + healthDotClass(health[h.key] ?? 'na');
+  });
+}
 
 // ── Save ───────────────────────────────────────────────────────────────────────
 function saveSettings() {
@@ -1460,10 +1662,11 @@ function loadState() {
     setMode(s.mixer_mode ?? 'Stereo');
     if (s.matrix) setMatrixDisplay(s.matrix);
     buildFaults(s.faults ?? {});
-    updateHealthLed(s.faults ?? {});
+    buildHealth(s.health ?? {});
+    updateHealthLed(s.faults ?? {}, s.health ?? {});
     abInit();
     suppressDirty = false;
-  }).catch(() => { buildEq(null); buildFaults(null); suppressDirty = false; });
+  }).catch(() => { buildEq(null); buildFaults(null); buildHealth(null); suppressDirty = false; });
   loadSysInfo();
 }
 
@@ -1496,7 +1699,10 @@ renderSparklines();
 initCurveDrag();
 loadCustomPresets();
 setInterval(() => {
-  fetch('/api/faults').then(r => r.json()).then(f => { updateFaults(f); updateHealthLed(f); }).catch(() => {});
+  Promise.all([
+    fetch('/api/faults').then(r => r.json()),
+    fetch('/api/health').then(r => r.json()),
+  ]).then(([f, h]) => { updateFaults(f); updateHealth(h); updateHealthLed(f, h); }).catch(() => {});
 }, 10000);
 setInterval(() => {
   fetch('/api/bt-volume').then(r => r.json()).then(d => {
@@ -1555,9 +1761,14 @@ class Handler(BaseHTTPRequestHandler):
                 {"key": k, "label": lbl, "warn": w}
                 for k, lbl, w in FAULT_CONTROLS
             ])
+            health_defs = json.dumps([
+                {"key": k, "label": lbl}
+                for k, lbl, _ in HOST_HEALTH_CHECKS
+            ])
             page = (HTML
                     .replace("__BAND_LABELS__", band_labels)
                     .replace("__FAULT_DEFS__",  fault_defs)
+                    .replace("__HEALTH_DEFS__", health_defs)
                     .replace("__EQ_VER__",       EQ_SERVER_VER))
             self._html(page)
 
@@ -1569,6 +1780,9 @@ class Handler(BaseHTTPRequestHandler):
 
         elif p == "/api/faults":
             self._json(get_faults())
+
+        elif p == "/api/health":
+            self._json(get_host_health())
 
         elif p == "/api/custom-presets":
             self._json(CUSTOM_PRESETS)
@@ -1587,6 +1801,9 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             self._json({"temp_c": temp_c})
+
+        elif p == "/api/update-check":
+            self._json(_UPDATE_INFO)
 
         else:
             self.send_response(404)
@@ -1681,6 +1898,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     threading.Thread(target=_bt_vol_restore_thread, daemon=True).start()
+    threading.Thread(target=_update_check_thread, daemon=True).start()
     server = HTTPServer(("0.0.0.0", 8081), Handler)
     print("[SquarePi DSP] Listening on http://0.0.0.0:8081")
     try:

@@ -4,6 +4,17 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.6.2] — 2026-07-14
+
+### Added
+- **Update-available badge in the EQ web UI.** A background check (once every 24h, never blocking a page load) compares `/etc/squarepi-release` against SquarePi's GitHub tags and shows a green **UPDATE** badge next to POWER when a newer version exists. Notify-only by design — clicking it shows the exact `update.sh` command to run over SSH; it never runs the update itself, so it adds no new root-triggerable action to the web UI. (Note: this reads the repo's git tags directly rather than GitHub's "latest release" API, since releases here are pushed as tags, not published as GitHub Releases — the releases endpoint would have returned a stale, unrelated result.)
+- **Host Health panel in the SYSTEM card.** Below the existing amp Fault Monitor, a second grid checks the Pi side of the stack: DSP card/driver detected, SD card free space, WiFi signal (shows "N/A" rather than a false warning on wired installs), Bluetooth adapter powered, and the four core services (MPD, BlueALSA, BlueALSA-aplay, mDNS). Every check fails soft — a missing tool or unreachable service shows as a status dot, never crashes the page. The SYSTEM card's existing health LED now reflects both amp faults and host issues together, so one glance still tells the whole story. Aimed at surfacing "why doesn't it work" problems before a non-technical user has to ask.
+
+### Changed
+- **EQ web UI's Save buttons, consolidated.** There were 5 buttons that said "Save" in some form but only 2 distinct actions: 3 identical shortcuts to "commit current settings so they survive a reboot" (topbar SAVE button, a topbar floppy-disk icon, and a SYSTEM-card button) and 2 identical shortcuts to "save the current EQ curve as a named preset" (one in the EQ card header, one next to the preset-name field). Down to one of each now — topbar **SAVE TO CHIP** (tooltip explains what it commits) and the EQ card's **Save as preset** (tooltip clarifies it doesn't affect what survives a reboot, next to the name field where it contextually belongs).
+
+---
+
 ## [1.6.1] — 2026-07-14
 
 ### Fixed

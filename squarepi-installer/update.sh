@@ -58,7 +58,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
-TARGET_VER="1.6.1"  # <-- bump this every release (see guide above)
+TARGET_VER="1.6.2"  # <-- bump this every release (see guide above)
 CARD="LouderRaspberry"
 RELEASE_FILE="/etc/squarepi-release"
 EQ_SERVER_DEST="/usr/local/bin/squarepi-eq-server.py"
@@ -488,6 +488,43 @@ fi
 
 # =============================================================================
 # ### END v1.6.1 DELTA
+# =============================================================================
+
+# =============================================================================
+# ### v1.6.2 DELTA — EQ UI: update-notify badge, save-button consolidation,
+# ### host health monitoring
+# ### (released 2026-07-14; brings any pre-1.6.2 install forward)
+# ###
+# ### Gated on version, not just internal state: an install already at 1.6.2+
+# ### skips this whole block on every future run.
+# =============================================================================
+if version_lt "${CURRENT_VER}" "1.6.2"; then
+
+if [[ -f "${EQ_SERVER_DEST}" ]] || unit_exists squarepi-eq.service; then
+  step "Updating EQ web server (update-notify, save buttons, host health)"
+  if fetch_repo_file "eq-server.py" "${EQ_SERVER_DEST}"; then
+    chmod +x "${EQ_SERVER_DEST}"
+    success "eq-server.py updated"
+  else
+    warn "Could not fetch eq-server.py — leaving the existing one in place"
+  fi
+else
+  info "EQ web server not installed — skipping eq-server.py update"
+fi
+
+APPLIED+=(
+  "EQ web UI: notify-only update badge (checks GitHub tags, never runs update.sh itself)"
+  "EQ web UI: removed duplicate Save buttons (3 identical 'Save to chip' + 2 identical 'Save EQ' down to one each) and clarified their labels"
+  "EQ web UI: new Host Health panel in the SYSTEM card (driver/card, disk space, WiFi signal, Bluetooth adapter, core services)"
+)
+
+else
+  info "v1.6.2 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v1.6.2 gate ---
+
+# =============================================================================
+# ### END v1.6.2 DELTA
 # ###
 # ### >>> The next release's "### vX.Y.Z DELTA" block goes HERE, above this
 # ###     line. Do not add new steps below — steps 9-10 below must always run
