@@ -58,7 +58,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
-TARGET_VER="1.6.2"  # <-- bump this every release (see guide above)
+TARGET_VER="1.6.3"  # <-- bump this every release (see guide above)
 CARD="LouderRaspberry"
 RELEASE_FILE="/etc/squarepi-release"
 EQ_SERVER_DEST="/usr/local/bin/squarepi-eq-server.py"
@@ -525,6 +525,43 @@ fi
 
 # =============================================================================
 # ### END v1.6.2 DELTA
+# =============================================================================
+
+# =============================================================================
+# ### v1.6.3 DELTA — EQ UI polish: collapsible cards, mixer matrix safety net,
+# ### curve-drag hint
+# ### (released 2026-07-15; brings any pre-1.6.3 install forward)
+# ###
+# ### Gated on version, not just internal state: an install already at 1.6.3+
+# ### skips this whole block on every future run.
+# =============================================================================
+if version_lt "${CURRENT_VER}" "1.6.3"; then
+
+if [[ -f "${EQ_SERVER_DEST}" ]] || unit_exists squarepi-eq.service; then
+  step "Updating EQ web server (collapsible cards, mixer safety net, curve hint)"
+  if fetch_repo_file "eq-server.py" "${EQ_SERVER_DEST}"; then
+    chmod +x "${EQ_SERVER_DEST}"
+    success "eq-server.py updated"
+  else
+    warn "Could not fetch eq-server.py — leaving the existing one in place"
+  fi
+else
+  info "EQ web server not installed — skipping eq-server.py update"
+fi
+
+APPLIED+=(
+  "EQ web UI: card sections now actually collapse/expand (the arrow indicator was previously decorative)"
+  "EQ web UI: Mixer's Custom matrix now explains itself and has a Reset to Stereo button"
+  "EQ web UI: added a discoverability hint for the drag-to-shape EQ curve"
+)
+
+else
+  info "v1.6.3 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v1.6.3 gate ---
+
+# =============================================================================
+# ### END v1.6.3 DELTA
 # ###
 # ### >>> The next release's "### vX.Y.Z DELTA" block goes HERE, above this
 # ###     line. Do not add new steps below — steps 9-10 below must always run

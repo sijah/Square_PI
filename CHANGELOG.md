@@ -4,6 +4,20 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.6.3] — 2026-07-15
+
+### Fixed
+- **Card section headers showed a "collapse" arrow that didn't collapse anything.** Every card title (`GAIN & BALANCE`, `EQUALIZER`, `MIXER`, `SYSTEM`) displayed a right-pointing arrow — the universal "click to expand/collapse" convention — with no click handler behind it. Now genuinely wired: click a title to collapse or expand that card, state persists across reloads. Fixed a bug this surfaced along the way: the EQ curve canvas sizes itself from its container's on-screen dimensions, which are 0×0 while collapsed, so expanding a previously-collapsed EQ card now explicitly redraws the curve instead of leaving it blank.
+
+### Added
+- **Mixer's Custom routing matrix explains itself.** The 4 raw cross-channel dB sliders had no explanation and no way back except manually resetting each one by hand. Added a one-line caption plus a "Reset to Stereo" button.
+- **Discoverability hint on the EQ curve graph.** The frequency-response curve has been directly draggable since v1.4.2, but nothing on the page said so — a small "drag to shape, or use faders below" hint now sits above the graph.
+
+### Changed
+- **Removed the topbar's duplicate PRESETS dropdown.** It was a pure duplicate of the EQ card's own preset selector (identical option list, identical handler) — the EQ card still has its dropdown and the full preset button row (which also does something the dropdowns didn't: shows which preset is currently active). The topbar's **SAVE TO CHIP** button regained a save icon on its own label now that it's the only save-to-chip control left.
+
+---
+
 ## [1.6.2] — 2026-07-14
 
 ### Added

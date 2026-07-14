@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-EQ_SERVER_VER = "1.6.2"
+EQ_SERVER_VER = "1.6.3"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
@@ -561,7 +561,6 @@ HTML = r"""<!DOCTYPE html>
   .topbar-actions { display:flex; align-items:center; gap:6px; }
   .tb-btn { background:var(--pan); color:var(--txt); border:1px solid var(--bdr); border-radius:3px; padding:5px 11px; font-size:0.57rem; font-family:inherit; letter-spacing:0.08em; cursor:pointer; }
   .tb-btn:hover { border-color:var(--acc); color:var(--acc); }
-  .preset-sel-top { background:var(--pan); color:var(--txt); border:1px solid var(--bdr); border-radius:3px; padding:5px 10px; font-size:0.57rem; font-family:inherit; letter-spacing:0.06em; cursor:pointer; outline:none; }
   .pwr-wrap { position:relative; }
   .pwr-btn { color:var(--red); border-color:var(--red); }
   .pwr-btn:hover { background:var(--red); color:#fff; }
@@ -602,8 +601,11 @@ HTML = r"""<!DOCTYPE html>
   /* Cards */
   .card { background:var(--bg); border:1px solid var(--bdr); border-left:2px solid var(--acc-dim); border-radius:5px; margin-bottom:8px; overflow:hidden; }
   .card-hdr { display:flex; align-items:center; padding:9px 14px; background:var(--sur); gap:8px; flex-wrap:wrap; }
-  .card-title { font-size:0.62rem; font-weight:700; color:var(--acc); letter-spacing:0.14em; flex-shrink:0; }
+  .card-title { font-size:0.62rem; font-weight:700; color:var(--acc); letter-spacing:0.14em; flex-shrink:0; cursor:pointer; user-select:none; }
+  .card-caret { display:inline-block; transform:rotate(90deg); transition:transform 0.15s; }
+  .card.collapsed .card-caret { transform:rotate(0deg); }
   .card-body { padding:12px 14px; background:var(--bg); }
+  .card.collapsed .card-body { display:none; }
   .eq-hdr-ctrls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; flex:1; justify-content:flex-end; }
   .preset-lbl { font-size:0.6rem; color:var(--label); letter-spacing:0.08em; }
   .preset-sel { background:var(--pan); color:var(--txt); border:1px solid var(--bdr); border-radius:2px; padding:4px 8px; font-size:0.55rem; font-family:inherit; letter-spacing:0.04em; outline:none; cursor:pointer; }
@@ -632,6 +634,7 @@ HTML = r"""<!DOCTYPE html>
   .eq-curve-wrap { background:var(--eq-panel); border:1px solid #0f1828; border-radius:3px 3px 0 0; border-bottom:none; position:relative; height:180px; overflow:hidden; }
   #eq-curve { width:100%; display:block; cursor:ns-resize; touch-action:none; }
   .curve-lbl { position:absolute; top:4px; right:7px; font-size:0.56rem; color:var(--tick); letter-spacing:0.1em; pointer-events:none; }
+  .curve-hint { position:absolute; top:4px; left:50%; transform:translateX(-50%); font-size:0.54rem; color:var(--tick); letter-spacing:0.06em; pointer-events:none; opacity:0.85; white-space:nowrap; }
 
   .eq-rack { background:var(--eq-panel); border:1px solid #0f1828; border-radius:0 0 3px 3px; padding:4px 2px 6px 2px; display:flex; align-items:stretch; }
   .db-scale { display:flex; flex-direction:column; justify-content:space-between; padding:23px 6px 16px 0; min-width:30px; }
@@ -687,6 +690,7 @@ HTML = r"""<!DOCTYPE html>
   .mode-btn.active { background:#0f2040; border-color:#3b82f6; color:#93c5fd; }
   .matrix { display:none; margin-top:8px; }
   .matrix.open { display:block; }
+  .matrix-hint { font-size:0.56rem; color:var(--label); line-height:1.5; margin-bottom:10px; padding:8px 10px; background:var(--pan); border:1px solid var(--bdr); border-radius:3px; }
   .matrix-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   .mat-lbl { font-size:0.58rem; color:var(--mut); letter-spacing:0.07em; text-transform:uppercase; margin-bottom:3px; }
 
@@ -799,23 +803,7 @@ HTML = r"""<!DOCTYPE html>
       <option value="graphite">Graphite</option>
       <option value="daylight">Daylight</option>
     </select>
-    <button class="tb-btn" onclick="saveSettings()" title="Commit current gain/balance/EQ/mixer settings so they survive a reboot">SAVE TO CHIP</button>
-    <select class="preset-sel-top" onchange="if(this.value){applyPreset(this.value);this.value=''}">
-      <option value="">PRESETS &#9660;</option>
-      <option value="flat">Flat</option>
-      <option value="bass_boost">Bass Boost</option>
-      <option value="treble">Treble</option>
-      <option value="vocal">Vocal</option>
-      <option value="night">Night</option>
-      <option value="late_night">Late Night</option>
-      <option value="rock">Rock</option>
-      <option value="pop">Pop</option>
-      <option value="jazz">Jazz</option>
-      <option value="classical">Classical</option>
-      <option value="club">Club</option>
-      <option value="hiphop">Hip-Hop</option>
-      <option value="acoustic">Acoustic</option>
-    </select>
+    <button class="tb-btn" onclick="saveSettings()" title="Commit current gain/balance/EQ/mixer settings so they survive a reboot">&#128190;&nbsp;SAVE TO CHIP</button>
     <div class="upd-wrap" id="upd-wrap" style="display:none">
       <button class="tb-btn upd-btn" title="Update available" onclick="toggleUpdateMenu(event)">&#8593;&nbsp;UPDATE</button>
       <div class="upd-menu" id="upd-menu">
@@ -879,7 +867,7 @@ HTML = r"""<!DOCTYPE html>
 <!-- GAIN & BALANCE -->
 <div class="card" id="card-gain">
   <div class="card-hdr">
-    <span class="card-title">&#x25BA; GAIN &amp; BALANCE</span>
+    <span class="card-title" onclick="toggleCard('gain')"><span class="card-caret">&#x25BA;</span> GAIN &amp; BALANCE</span>
   </div>
   <div class="card-body">
     <div class="ctrl-row">
@@ -903,7 +891,7 @@ HTML = r"""<!DOCTYPE html>
 <!-- EQ -->
 <div class="card" id="card-eq">
   <div class="card-hdr">
-    <span class="card-title">&#x25BA; EQUALIZER &mdash; 15 BAND</span>
+    <span class="card-title" onclick="toggleCard('eq')"><span class="card-caret">&#x25BA;</span> EQUALIZER &mdash; 15 BAND</span>
     <span class="unsaved-chip" id="unsaved-chip"><span class="udot"></span>UNSAVED</span>
     <div class="eq-hdr-ctrls">
       <span class="ab-lbl">A/B</span>
@@ -960,6 +948,7 @@ HTML = r"""<!DOCTYPE html>
       <div class="eq-curve-wrap">
         <canvas id="eq-curve"></canvas>
         <span class="curve-lbl">FREQ RESPONSE</span>
+        <span class="curve-hint">&#8597; drag to shape, or use faders below</span>
       </div>
       <div class="eq-rack">
         <div class="db-scale">
@@ -989,10 +978,10 @@ HTML = r"""<!DOCTYPE html>
 <!-- MIXER -->
 <div class="card" id="card-mixer">
   <div class="card-hdr">
-    <span class="card-title">&#x25BA; MIXER</span>
+    <span class="card-title" onclick="toggleCard('mixer')"><span class="card-caret">&#x25BA;</span> MIXER</span>
   </div>
   <div class="card-body">
-    <div style="font-size:0.48rem;color:var(--mut);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:5px">&#x25BA; Output Mode</div>
+    <div style="font-size:0.48rem;color:var(--mut);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:5px">Output Mode</div>
     <div class="mode-btns">
       <button class="mode-btn active" id="mb-Stereo" onclick="setMode('Stereo')">Stereo</button>
       <button class="mode-btn"        id="mb-Mono"   onclick="setMode('Mono')">Mono</button>
@@ -1001,6 +990,7 @@ HTML = r"""<!DOCTYPE html>
       <button class="mode-btn"        id="mb-Custom" onclick="setMode('Custom')">Custom</button>
     </div>
     <div class="matrix" id="matrix">
+      <div class="matrix-hint">Cross-channel mix — how much of each input reaches each output. 0&nbsp;dB = full, more negative = quieter. Only needed for non-standard wiring; most setups should stay on Stereo/Mono/Left/Right above.</div>
       <div class="matrix-grid">
         <div>
           <div class="mat-lbl">L in &#x2192; L out</div>
@@ -1031,6 +1021,7 @@ HTML = r"""<!DOCTYPE html>
           </div>
         </div>
       </div>
+      <button class="action-btn" style="margin-top:10px" onclick="setMode('Stereo')">Reset to Stereo</button>
     </div>
   </div>
 </div>
@@ -1038,7 +1029,7 @@ HTML = r"""<!DOCTYPE html>
 <!-- SYSTEM -->
 <div class="card" id="card-system">
   <div class="card-hdr">
-    <span class="card-title">&#x25BA; SYSTEM</span>
+    <span class="card-title" onclick="toggleCard('system')"><span class="card-caret">&#x25BA;</span> SYSTEM</span>
     <div class="eq-hdr-ctrls">
       <div class="sys-led" id="sys-health-led"></div>
       <span id="sys-health-txt" style="font-size:0.58rem;color:var(--mut)">Checking&hellip;</span>
@@ -1175,6 +1166,31 @@ function initTheme(){
   try { name = localStorage.getItem('squarepi-theme') || 'amber'; } catch(e){}
   if (!THEMES[name]) name='amber';
   applyTheme(name, false);
+}
+
+// ── Collapsible cards ────────────────────────────────────────────────────────────
+function toggleCard(id){
+  const card = document.getElementById('card-' + id);
+  if (!card) return;
+  card.classList.toggle('collapsed');
+  const isCollapsed = card.classList.contains('collapsed');
+  let collapsed = [];
+  try { collapsed = JSON.parse(localStorage.getItem('squarepi-collapsed') || '[]'); } catch(e){}
+  const idx = collapsed.indexOf(id);
+  if (isCollapsed) { if (idx === -1) collapsed.push(id); }
+  else if (idx !== -1) { collapsed.splice(idx, 1); }
+  try { localStorage.setItem('squarepi-collapsed', JSON.stringify(collapsed)); } catch(e){}
+  // Canvas sizes itself from getBoundingClientRect() — while the card was
+  // display:none that's 0x0, so redraw once real dimensions are back.
+  if (id === 'eq' && !isCollapsed && typeof drawCurve === 'function') drawCurve();
+}
+function initCollapsed(){
+  let collapsed = [];
+  try { collapsed = JSON.parse(localStorage.getItem('squarepi-collapsed') || '[]'); } catch(e){}
+  collapsed.forEach(id => {
+    const card = document.getElementById('card-' + id);
+    if (card) card.classList.add('collapsed');
+  });
 }
 function themeColors(){
   const cs=getComputedStyle(document.documentElement);
@@ -1695,6 +1711,7 @@ function toggleBypass() {
 }
 
 initTheme();
+initCollapsed();
 renderSparklines();
 initCurveDrag();
 loadCustomPresets();
