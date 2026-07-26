@@ -58,7 +58,7 @@ detach_usb_drives() {
 # Banner
 # -----------------------------------------------------------------------------
 echo -e "${BOLD}"
-INSTALLER_VER="1.6.3"
+INSTALLER_VER="2.0.0"
 
 echo "  ╔══════════════════════════════════════════════╗"
 echo "  ║         SquarePi Software Uninstaller        ║"
@@ -464,6 +464,58 @@ rm -f /usr/local/bin/squarepi-airplay-event.sh
 rm -f /tmp/squarepi-source-airplay
 systemctl daemon-reload
 info "AirPlay removed"
+
+# -----------------------------------------------------------------------------
+# 14b. Remove local display (if installed)
+# -----------------------------------------------------------------------------
+step "Removing local display (if installed)"
+
+if systemctl is-active --quiet squarepi-display 2>/dev/null; then
+  systemctl stop squarepi-display
+fi
+if systemctl is-enabled --quiet squarepi-display 2>/dev/null; then
+  systemctl disable squarepi-display
+fi
+rm -f /etc/systemd/system/squarepi-display.service
+rm -rf /usr/local/lib/squarepi-display
+rm -f /tmp/mpd.fifo
+
+# Drop the VU-meter fifo output from mpd.conf. MPD itself is normally removed
+# further up, but /etc/mpd.conf survives the package removal — and the user may
+# have chosen to keep MPD — so an audio_output still pointing at a deleted pipe
+# would leave MPD refusing to start. This deletes the whole audio_output block,
+# not just its name line: awk buffers each block and re-emits all of them except
+# vu_meter's.
+if [[ -f /etc/mpd.conf ]] && grep -qE '^[[:space:]]*name[[:space:]]+"vu_meter"' /etc/mpd.conf; then
+  MPDCONF_TMP="$(mktemp)"
+  if awk '
+      !inblk && /^[[:space:]]*audio_output[[:space:]]*\{/ { blk = $0 ORS; inblk = 1; isvu = 0; next }
+      inblk {
+        blk = blk $0 ORS
+        if ($0 ~ /^[[:space:]]*name[[:space:]]+"vu_meter"/) { isvu = 1 }
+        if ($0 ~ /^[[:space:]]*\}/) {
+          if (!isvu) { printf "%s", blk }
+          inblk = 0; blk = ""
+        }
+        next
+      }
+      { print }
+      END { if (inblk && !isvu) { printf "%s", blk } }
+    ' /etc/mpd.conf > "${MPDCONF_TMP}"; then
+    # cat rather than mv, so mpd.conf keeps its existing owner and mode.
+    cat "${MPDCONF_TMP}" > /etc/mpd.conf
+    info "Removed VU-meter fifo output from /etc/mpd.conf"
+  else
+    warn "Could not rewrite /etc/mpd.conf — the vu_meter output block is still present"
+  fi
+  rm -f "${MPDCONF_TMP}"
+fi
+
+# dtparam=spi=on is deliberately left in config.txt. Enabling SPI costs nothing,
+# and the user may have other SPI devices on the header that would stop working
+# if we turned it back off.
+systemctl daemon-reload
+info "Local display removed"
 
 # -----------------------------------------------------------------------------
 # 15. Remove sleep timer

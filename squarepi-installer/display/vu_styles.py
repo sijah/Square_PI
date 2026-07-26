@@ -16,7 +16,11 @@ import random
 
 from PIL import Image, ImageDraw
 
-from screens import BAR_BG, BG, DIM, FG, _font
+# The 2.0.0 palette renamed BAR_BG -> RULE and split _font into reg()/bold()
+# by face. These 19 meters were designed against the bold face, so bold() is
+# the faithful substitution.
+from screens import BG, DIM, FG, RULE as BAR_BG
+from screens import bold as _font
 
 WIDTH, HEIGHT = 160, 128
 

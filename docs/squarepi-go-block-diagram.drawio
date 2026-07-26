@@ -1,0 +1,121 @@
+<mxfile host="Electron" agent="claude">
+  <diagram id="squarepi-go-block" name="SquarePi GO - Block Diagram">
+    <mxGraphModel dx="1030" dy="626" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="power" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="12–24V DC Power Supply&#xa;(barrel jack)" vertex="1">
+          <mxGeometry height="50" width="220" x="480" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="hat" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1" value="SquarePi HAT&#xa;(TAS5805M Class-D Amp + Speaker Terminals)" vertex="1">
+          <mxGeometry height="70" width="520" x="330" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="speakers" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" value="Passive Speakers (4–8Ω)" vertex="1">
+          <mxGeometry height="40" width="200" x="60" y="145" as="geometry" />
+        </mxCell>
+        <mxCell id="header" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1" value="40-pin GPIO Header  (shared interface)&#xa;I2S audio  |  I2C1 (DSP control, addr 0x2c)  |  3.3V/5V logic" vertex="1">
+          <mxGeometry height="50" width="520" x="330" y="240" as="geometry" />
+        </mxCell>
+        <mxCell id="chooseone" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontStyle=2;fontColor=#990000;" value="Choose ONE brain board — mutually exclusive, only one seated at a time" vertex="1">
+          <mxGeometry height="30" width="520" x="330" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="optA" parent="1" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fontStyle=1;fillColor=#e1d5e7;strokeColor=#9673a6;" value="OPTION A — Full SquarePi" vertex="1">
+          <mxGeometry height="280" width="380" x="130" y="350" as="geometry" />
+        </mxCell>
+        <mxCell id="pi" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;" value="Raspberry Pi 3/4" vertex="1">
+          <mxGeometry height="40" width="320" x="160" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="pistack" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;" value="MPD + BlueALSA + ALSA dmix/soxr&#xa;(SquarePi Audio Engine)" vertex="1">
+          <mxGeometry height="50" width="320" x="160" y="445" as="geometry" />
+        </mxCell>
+        <mxCell id="eqserver" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;" value="eq-server (Flask Web UI)&#xa;+ mDNS + local display (2.0.0)" vertex="1">
+          <mxGeometry height="50" width="320" x="160" y="510" as="geometry" />
+        </mxCell>
+        <mxCell id="piFeatures" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=11;fontColor=#666666;" value="Full features: network streaming, USB/library playback,&#xa;internet radio, DLNA/AirPlay, multi-source mixing" vertex="1">
+          <mxGeometry height="40" width="320" x="160" y="570" as="geometry" />
+        </mxCell>
+        <mxCell id="optB" parent="1" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fontStyle=1;fillColor=#ffe6cc;strokeColor=#d79b00;" value="OPTION B — SquarePi GO Addon Board" vertex="1">
+          <mxGeometry height="280" width="440" x="560" y="350" as="geometry" />
+        </mxCell>
+        <mxCell id="qcc3034" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;" value="QCC3034 BT Module&#xa;(aptX/aptX HD/AAC decode)" vertex="1">
+          <mxGeometry height="55" width="180" x="590" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="esp32" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;" value="ESP32&#xa;(I2C DSP master, WiFi EQ UI)" vertex="1">
+          <mxGeometry height="55" width="180" x="790" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="display" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;" value="Local Display + Rotary Encoder" vertex="1">
+          <mxGeometry height="45" width="180" x="790" y="465" as="geometry" />
+        </mxCell>
+        <mxCell id="wifiui" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;" value="WiFi EQ Web UI&#xa;(replaces eq-server)" vertex="1">
+          <mxGeometry height="45" width="180" x="590" y="465" as="geometry" />
+        </mxCell>
+        <mxCell id="goFeatures" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=11;fontColor=#666666;" value="GO features: instant-on, no SD card,&#xa;BT + EQ only — no MPD/library/streaming" vertex="1">
+          <mxGeometry height="40" width="380" x="590" y="520" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="power" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="hat">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1label" parent="1" style="text;html=1;fontSize=10;" value="PVDD (amp rail)" vertex="1">
+          <mxGeometry height="20" width="120" x="700" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="hat" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="speakers">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2label" parent="1" style="text;html=1;fontSize=10;" value="Speaker out L/R" vertex="1">
+          <mxGeometry height="20" width="120" x="120" y="105" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="hat" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;startArrow=block;" target="header">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="header" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;startArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="pi">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="320" y="270" />
+              <mxPoint x="320" y="410" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4label" parent="1" style="text;html=1;fontSize=10;" value="I2S + I2C" vertex="1">
+          <mxGeometry height="20" width="80" x="240" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="qcc3034" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;startArrow=none;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" target="header">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="680" y="300" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5label" parent="1" style="text;html=1;fontSize=10;" value="I2S out" vertex="1">
+          <mxGeometry height="20" width="70" x="640" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="esp32" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;startArrow=none;exitX=0.5;exitY=0;entryX=0.7;entryY=1;" target="header">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="880" y="300" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e6label" parent="1" style="text;html=1;fontSize=10;" value="I2C (DSP control)" vertex="1">
+          <mxGeometry height="20" width="110" x="820" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="esp32" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="display">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="esp32" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="wifiui">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="880" y="450" />
+              <mxPoint x="680" y="450" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="pi" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=none;dashed=1;" target="pistack">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="pistack" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=none;dashed=1;" target="eqserver">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

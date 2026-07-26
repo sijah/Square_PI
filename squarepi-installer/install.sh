@@ -8,8 +8,8 @@
 #
 #  Usage:
 #    sudo bash install.sh                 # MPD + myMPD + Bluetooth + EQ UI (default)
-#    sudo bash install.sh --with-dlna --with-spotify --with-airplay
-#    sudo bash install.sh --all           # everything (DLNA, Spotify, AirPlay too)
+#    sudo bash install.sh --with-dlna --with-spotify --with-airplay --with-display
+#    sudo bash install.sh --all           # everything (DLNA, Spotify, AirPlay, Display too)
 #    sudo SQUAREPI_HOSTNAME=squarepi bash install.sh
 #    sudo SQUAREPI_BT_NAME="Kitchen SquarePi" bash install.sh
 #
@@ -50,19 +50,49 @@ INSTALL_EQ=1
 INSTALL_DLNA=0
 INSTALL_SPOTIFY=0
 INSTALL_AIRPLAY=0
+INSTALL_DISPLAY=0
+#
+# Unrecognised arguments are a hard error, not a shrug. These flags are usually
+# typed by hand into a long `curl … | sudo bash -s -- …` line, and the failure
+# mode of ignoring a typo is the worst kind: the install succeeds, says nothing,
+# and simply lacks the feature that was asked for. "--with display" (two words)
+# and "--with_display" both used to sail straight through.
+UNKNOWN_ARGS=()
 for arg in "$@"; do
-  [[ "$arg" == "--with-dlna"    ]] && INSTALL_DLNA=1
-  [[ "$arg" == "--with-spotify" ]] && INSTALL_SPOTIFY=1
-  [[ "$arg" == "--with-airplay" ]] && INSTALL_AIRPLAY=1
-  if [[ "$arg" == "--all" ]]; then
-    INSTALL_DLNA=1; INSTALL_SPOTIFY=1; INSTALL_AIRPLAY=1
-  fi
+  case "$arg" in
+    --with-dlna)         INSTALL_DLNA=1 ;;
+    --with-spotify)      INSTALL_SPOTIFY=1 ;;
+    --with-airplay)      INSTALL_AIRPLAY=1 ;;
+    --with-display)      INSTALL_DISPLAY=1 ;;
+    --all)               INSTALL_DLNA=1; INSTALL_SPOTIFY=1; INSTALL_AIRPLAY=1; INSTALL_DISPLAY=1 ;;
+    --with-bt|--with-eq) ;;  # accepted no-ops (see above) — BT and EQ are always installed
+    --)                  ;;  # conventional end-of-options marker, harmless
+    *)                   UNKNOWN_ARGS+=("$arg") ;;
+  esac
 done
+
+if [[ ${#UNKNOWN_ARGS[@]} -gt 0 ]]; then
+  echo -e "${RED}[ERROR]${NC} Unrecognised argument(s): ${UNKNOWN_ARGS[*]}"
+  echo ""
+  echo "  Valid flags (each is a single word — note the hyphens):"
+  echo "    --with-dlna       Add DLNA/UPnP renderer"
+  echo "    --with-spotify    Add Spotify Connect"
+  echo "    --with-airplay    Add AirPlay"
+  echo "    --with-display    Add the local ST7735 display + KY-040 encoder"
+  echo "    --all             Everything above"
+  echo ""
+  echo "  Bluetooth and the EQ web UI are always installed — no flag needed."
+  echo ""
+  echo "  Example:"
+  echo "    sudo bash install.sh --with-display"
+  echo ""
+  exit 1
+fi
 
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.6.3"
+INSTALLER_VER="2.0.0"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -90,6 +120,7 @@ INSTALL_LINE="MPD · myMPD"
 [[ $INSTALL_DLNA    -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · DLNA"
 [[ $INSTALL_SPOTIFY -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · Spotify"
 [[ $INSTALL_AIRPLAY -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · AirPlay"
+[[ $INSTALL_DISPLAY -eq 1 ]] && INSTALL_LINE="${INSTALL_LINE} · Display"
 
 echo -e "${BOLD}${CYAN}"
 echo "  ╔══════════════════════════════════════════════╗"
@@ -420,6 +451,18 @@ playlist_directory "/var/lib/mpd/playlists"
 db_file            "/var/lib/mpd/tag_cache"
 sticker_file       "/var/lib/mpd/sticker.db"
 state_file         "/var/lib/mpd/state"
+# How often the queue + playback position are flushed to state_file. MPD's
+# default is 120s, which means yanking the power right after queueing tracks
+# loses them -- and then the local display has no queue to resume on next boot.
+# 30s narrows that window; the file is a few KB, so the extra writes are noise.
+state_file_interval "30"
+# Come back paused rather than playing. MPD's default ("no") resumes playback
+# during startup -- but USB drives are mounted by udev AFTER mpd.service starts,
+# so a restored queue of USB tracks would have MPD erroring through files that
+# aren't mounted yet. Restoring paused means the queue is intact and waiting; the
+# local display's "Resume Queue" (or a press on Now Playing) starts it once the
+# drive is up. Side benefit: the speaker never starts playing on its own at boot.
+restore_paused     "yes"
 log_file           "/var/log/mpd/mpd.log"
 
 user               "mpd"
@@ -673,7 +716,14 @@ case "\$fstype" in
 esac
 mkdir -p "\$mp"
 if mount -t "\$fstype" \${opts:+-o "\$opts"} "\$dev" "\$mp"; then
-  mpc update "usb/\$1" >/dev/null 2>&1 || true
+  # Only refresh the database if MPD is actually up. This unit is ordered
+  # Before=mpd.service, so at boot it runs while MPD is still down -- and mpc
+  # blocking on a daemon that isn't listening delayed boot by minutes. No refresh
+  # is needed then anyway: the tag cache already lists the drive's songs, and once
+  # MPD starts, auto_update's inotify watch keeps up with any changes.
+  if systemctl is-active --quiet mpd; then
+    mpc update "usb/\$1" >/dev/null 2>&1 || true
+  fi
 else
   rmdir "\$mp" 2>/dev/null || true
 fi
@@ -682,9 +732,21 @@ chmod +x /usr/local/bin/squarepi-usb-mount.sh
 
 cat > /usr/local/bin/squarepi-usb-umount.sh <<EOF
 #!/bin/bash
+# SquarePi USB unmount helper (systemd/udev-triggered).
 mp="${USB_MOUNT_ROOT}/\$1"
 umount -l "\$mp" 2>/dev/null || true
 rmdir "\$mp" 2>/dev/null || true
+
+# Skip the database refresh while the system is shutting down. This unit is
+# ordered After=mpd.service, so systemd stops it BEFORE mpd -- and refreshing
+# here made MPD purge every song on the drive, which prunes those songs from the
+# play queue (it keeps only the one currently playing). MPD then saved that
+# emptied queue to its state_file, which is why the queue never survived a reboot
+# for anyone with music on USB. Nobody browses the library on the way down, and
+# the next boot's mount runs "mpc update usb/<dev>" anyway.
+if [[ "\$(systemctl is-system-running 2>/dev/null)" == "stopping" ]]; then
+  exit 0
+fi
 mpc update "usb" >/dev/null 2>&1 || true
 EOF
 chmod +x /usr/local/bin/squarepi-usb-umount.sh
@@ -693,7 +755,15 @@ chmod +x /usr/local/bin/squarepi-usb-umount.sh
 cat > /etc/systemd/system/squarepi-usb-mount@.service <<'EOF'
 [Unit]
 Description=SquarePi USB auto-mount for %i
-After=mpd.service
+# Before, NOT After. systemd stops units in reverse order, so "After=mpd.service"
+# meant this unit was torn down while MPD was still running -- and MPD (with
+# auto_update's inotify watch on the mount point) reacted to the drive vanishing
+# by purging every song on it from the database, which prunes them from the play
+# queue. MPD then saved that emptied queue, so the queue never survived a reboot.
+# Ordering Before mpd.service means MPD is stopped first and is already gone when
+# the drive goes away. As a bonus, at boot MPD waits for the mount when udev has
+# already queued it, so the restored queue's files are present from the start.
+Before=mpd.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
@@ -811,6 +881,7 @@ EQ_ENABLED=${INSTALL_EQ}
 DLNA_ENABLED=${INSTALL_DLNA}
 SPOTIFY_ENABLED=${INSTALL_SPOTIFY}
 AIRPLAY_ENABLED=${INSTALL_AIRPLAY}
+DISPLAY_ENABLED=${INSTALL_DISPLAY}
 EOF
 chmod 644 "${RELEASE_FILE}"
 success "Release metadata written to ${RELEASE_FILE}"
@@ -1429,6 +1500,189 @@ fi
 fi  # end INSTALL_AIRPLAY
 
 # =============================================================================
+# LOCAL DISPLAY — ST7735 TFT + KY-040 rotary encoder (only if --with-display passed)
+# =============================================================================
+if [[ $INSTALL_DISPLAY -eq 1 ]]; then
+
+step "[Display] Installing display dependencies (ST7735 TFT + KY-040 encoder)"
+
+DISPLAY_SRC="${SCRIPT_DIR}/display"
+if [[ ! -d "${DISPLAY_SRC}" ]]; then
+  warn "display/ directory not found next to install.sh — skipping local display. Core install continues."
+  INSTALL_DISPLAY=0
+else
+  apt-get install -y -qq python3-pip 2>/dev/null || true
+  if pip3 install --break-system-packages -q gpiozero adafruit-circuitpython-rgb-display adafruit-blinka pillow; then
+    success "Display Python dependencies installed"
+  else
+    warn "Display dependency install failed — skipping local display. Core install continues."
+    INSTALL_DISPLAY=0
+  fi
+
+  # Indic script fonts for track titles tagged in Malayalam, Hindi or Tamil. The
+  # bundled DejaVu faces have no glyphs for these, and Pillow has no font fallback,
+  # so without them such titles render as .notdef boxes.
+  #
+  # Noto first: it ships bold cuts, so a regional title renders in the same weight a
+  # Latin one does, and it is hinted for screens — which matters at 15px on a 160x128
+  # panel. It costs roughly 100 MB against Lohit's 2 MB, so Lohit is the fallback for
+  # a tight card rather than the default.
+  #
+  # Never fatal. A Latin-tagged library needs none of this, and the display falls
+  # back to DejaVu per script run. SQUAREPI_DISPLAY_FONTS=lohit forces the small set.
+  if [[ $INSTALL_DISPLAY -eq 1 ]]; then
+    FONT_SET="${SQUAREPI_DISPLAY_FONTS:-noto}"
+    FONTS_OK=0
+    if [[ "${FONT_SET}" == "noto" ]]; then
+      if apt-get install -y -qq fonts-noto-core 2>/dev/null; then
+        success "Indic script fonts installed (Noto: Devanagari, Malayalam, Tamil, with bold)"
+        FONTS_OK=1
+      else
+        warn "fonts-noto-core unavailable — falling back to the smaller Lohit fonts"
+      fi
+    fi
+    if [[ ${FONTS_OK} -eq 0 ]]; then
+      if apt-get install -y -qq fonts-lohit-deva fonts-lohit-mlym fonts-lohit-taml 2>/dev/null; then
+        success "Indic script fonts installed (Lohit: Devanagari, Malayalam, Tamil)"
+      else
+        warn "Indic font install failed — non-Latin track titles may show as boxes. Continuing."
+      fi
+    fi
+  fi
+fi
+
+fi  # end display dependency install
+
+# Remaining display configuration only runs if deps installed cleanly
+if [[ $INSTALL_DISPLAY -eq 1 ]]; then
+
+# -----------------------------------------------------------------------------
+# Display-1. Enable SPI
+# -----------------------------------------------------------------------------
+step "[Display] Enabling SPI"
+
+if grep -q "^#dtparam=spi=on" "${CONFIG_FILE}"; then
+  sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' "${CONFIG_FILE}"
+  info "Enabled SPI (uncommented dtparam=spi=on)"
+elif ! grep -q "^dtparam=spi=on" "${CONFIG_FILE}"; then
+  echo "dtparam=spi=on" >> "${CONFIG_FILE}"
+  info "Added dtparam=spi=on"
+else
+  info "SPI already enabled"
+fi
+
+# -----------------------------------------------------------------------------
+# Display-2. Install the display module
+# -----------------------------------------------------------------------------
+step "[Display] Installing display service files"
+
+DISPLAY_DEST="/usr/local/lib/squarepi-display"
+rm -rf "${DISPLAY_DEST}"
+mkdir -p "${DISPLAY_DEST}"
+cp -r "${DISPLAY_SRC}/." "${DISPLAY_DEST}/"
+success "Display module installed to ${DISPLAY_DEST}"
+
+# -----------------------------------------------------------------------------
+# Display-3. Add MPD VU-meter fifo output (additive — does not touch squarepi_mix)
+# -----------------------------------------------------------------------------
+step "[Display] Adding MPD VU-meter fifo output"
+
+# Match on whitespace class, not a literal run of spaces: the heredoc below
+# indents with 4 and an earlier version of this guard looked for 12, so it never
+# matched and the "already present" branch was unreachable.
+if ! grep -qE '^[[:space:]]*name[[:space:]]+"vu_meter"' /etc/mpd.conf; then
+  cat >> /etc/mpd.conf <<'EOF'
+
+audio_output {
+    type    "fifo"
+    name    "vu_meter"
+    path    "/tmp/mpd.fifo"
+    format  "44100:16:2"
+}
+EOF
+  systemctl restart mpd 2>/dev/null || true
+  success "VU-meter fifo output added to /etc/mpd.conf"
+else
+  info "VU-meter fifo output already present"
+fi
+
+# -----------------------------------------------------------------------------
+# Display-4. systemd service
+# -----------------------------------------------------------------------------
+step "[Display] Installing display systemd service"
+
+cat > /etc/systemd/system/squarepi-display.service <<EOF
+[Unit]
+Description=SquarePi Local Display (ST7735 + KY-040)
+# mpd.service is ordered before us so the first frame after boot can already show
+# the restored queue. Wants (not Requires) because the display is still useful
+# with MPD down -- it degrades to "MPD unreachable" rather than refusing to start.
+After=network.target sound.target mpd.service
+Wants=mpd.service
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sleep 5
+WorkingDirectory=${DISPLAY_DEST}
+ExecStart=/usr/bin/python3 ${DISPLAY_DEST}/main.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable squarepi-display
+systemctl start squarepi-display
+sleep 2
+
+if systemctl is-active --quiet squarepi-display; then
+  success "Display service running"
+else
+  warn "Display service not running yet — needs SPI enabled (reboot) and hardware wired. Check: journalctl -u squarepi-display"
+fi
+
+fi  # end INSTALL_DISPLAY
+
+# =============================================================================
+# Reconcile release metadata with what actually installed
+#
+# Section 17 writes ${RELEASE_FILE} early, before any of the optional-feature
+# blocks run. Every one of those blocks is fail-soft: when a dependency is
+# missing it warns, sets its own INSTALL_* flag back to 0, and lets the core
+# install continue. So the *_ENABLED lines written up there record intent, not
+# outcome — a box where BlueALSA or the display deps were unavailable would
+# still advertise the feature as enabled.
+#
+# Rewriting them here, after every block has had its say, is what makes
+# /etc/squarepi-release truthful. The EQ web UI reads this file to decide which
+# panels to show, so a stale flag surfaces as a control for hardware that isn't
+# there.
+# =============================================================================
+step "Reconciling ${BRAND_NAME} release metadata"
+
+set_release_flag() {  # set_release_flag <KEY> <value>
+  if grep -q "^$1=" "${RELEASE_FILE}"; then
+    sed -i "s/^$1=.*/$1=$2/" "${RELEASE_FILE}"
+  else
+    echo "$1=$2" >> "${RELEASE_FILE}"
+  fi
+}
+
+if [[ -f "${RELEASE_FILE}" ]]; then
+  set_release_flag BLUETOOTH_ENABLED "${INSTALL_BT}"
+  set_release_flag EQ_ENABLED        "${INSTALL_EQ}"
+  set_release_flag DLNA_ENABLED      "${INSTALL_DLNA}"
+  set_release_flag SPOTIFY_ENABLED   "${INSTALL_SPOTIFY}"
+  set_release_flag AIRPLAY_ENABLED   "${INSTALL_AIRPLAY}"
+  set_release_flag DISPLAY_ENABLED   "${INSTALL_DISPLAY}"
+  success "Release metadata reflects what actually installed"
+else
+  warn "${RELEASE_FILE} missing — skipping metadata reconcile"
+fi
+
+# =============================================================================
 # Final summary
 # =============================================================================
 trap - EXIT
@@ -1480,6 +1734,11 @@ fi
 if [[ $INSTALL_AIRPLAY -eq 1 ]]; then
 echo ""
 echo -e "  ${BOLD}AirPlay:${NC}         Select '${BT_DEVICE_NAME}' in AirPlay device list"
+fi
+
+if [[ $INSTALL_DISPLAY -eq 1 ]]; then
+echo ""
+echo -e "  ${BOLD}Local display:${NC}  ST7735 + KY-040 enabled — needs the SPI reboot below to come up"
 fi
 
 echo ""

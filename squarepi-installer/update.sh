@@ -58,7 +58,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
-TARGET_VER="1.6.3"  # <-- bump this every release (see guide above)
+TARGET_VER="2.0.0"  # <-- bump this every release (see guide above)
 CARD="LouderRaspberry"
 RELEASE_FILE="/etc/squarepi-release"
 EQ_SERVER_DEST="/usr/local/bin/squarepi-eq-server.py"
@@ -562,6 +562,100 @@ fi
 
 # =============================================================================
 # ### END v1.6.3 DELTA
+# =============================================================================
+
+# =============================================================================
+# ### v2.0.0 DELTA — local on-device display (ST7735 + KY-040), opt-in
+# ### (released 2026-07-25; brings any pre-2.0.0 install forward)
+# ###
+# ### Gated on version, not just internal state: an install already at 2.0.0+
+# ### skips this whole block on every future run.
+# ###
+# ### Two cases here, and they need opposite handling:
+# ###
+# ###   Display NOT installed — nothing to migrate. It needs hardware wired and
+# ###   a whole new directory tree, and fetch_repo_file only pulls single files,
+# ###   so install.sh --with-display is the only way in. The hint for that lives
+# ###   OUTSIDE this gate (further down, near the summary) so it keeps appearing
+# ###   on later runs. Inside the gate it would fire exactly once, on the run
+# ###   that bumps past 2.0.0, and never again.
+# ###
+# ###   Display IS installed — refresh the module files in place, the same way
+# ###   this updater refreshes eq-server.py. Without this branch the updater
+# ###   could never deliver a display fix at all.
+# =============================================================================
+DISPLAY_DEST="/usr/local/lib/squarepi-display"
+DISPLAY_FILES=(
+  audio_control.py eq_presets.py main.py screens.py st7735_driver.py
+  vu_meter.py vu_styles.py
+  # nav.py and sysinfo.py were split out of main.py during 2.0.0 and script_fonts.py
+  # came with regional-script support. All three are imported by main.py, so leaving
+  # them out of this list would deliver a main.py that cannot start.
+  nav.py sysinfo.py script_fonts.py
+  demo_auto_cycle.py demo_cycle_screens.py demo_vu_styles.py
+  test_encoder_hello.py test_tft_hello.py
+)
+# Not optional, and not .py: screens.py opens these by absolute path on its first
+# render, so a 2.0.0 screens.py delivered without them raises OSError immediately and
+# systemd's Restart=on-failure turns that into a crash loop. Only the Bold face
+# shipped before 2.0.0 — the regular and mono cuts are new files, which is exactly
+# why a .py-only refresh list was silently wrong.
+DISPLAY_FONTS=(
+  fonts/DejaVuSans.ttf fonts/DejaVuSans-Bold.ttf fonts/DejaVuSansMono-Bold.ttf
+  fonts/LICENSE_DEJAVU
+)
+
+# Installed = the module tree is there, or the unit is (either alone is enough:
+# a half-removed install should still get refreshed rather than silently skipped).
+display_installed() { [[ -d "${DISPLAY_DEST}" ]] || unit_exists squarepi-display.service; }
+
+if version_lt "${CURRENT_VER}" "2.0.0"; then
+
+if display_installed; then
+  step "Refreshing local display module (${DISPLAY_DEST})"
+  DISPLAY_OK=0
+  DISPLAY_FAIL=0
+  mkdir -p "${DISPLAY_DEST}" "${DISPLAY_DEST}/fonts"
+  for f in "${DISPLAY_FILES[@]}" "${DISPLAY_FONTS[@]}"; do
+    if fetch_repo_file "display/${f}" "${DISPLAY_DEST}/${f}"; then
+      DISPLAY_OK=$((DISPLAY_OK + 1))
+    else
+      DISPLAY_FAIL=$((DISPLAY_FAIL + 1))
+      warn "Could not fetch display/${f} — leaving the existing copy in place"
+    fi
+  done
+  if [[ ${DISPLAY_OK} -gt 0 ]]; then
+    success "Refreshed ${DISPLAY_OK} display file(s)"
+    APPLIED+=(
+      "Local display: the VU meter now reports actual signal level — the previous damping step depended only on the ratio between consecutive samples, so it measured rate-of-change and steady audio sat pegged near full scale"
+      "Local display: the audio fifo is now decoded in bulk rather than one 4-byte read per sample, cutting the metering thread's CPU and syscall load"
+      "Local display: all 19 VU meter styles are reachable from a fifth screen (long-press to reach it, rotate to change style)"
+    )
+  fi
+  if [[ ${DISPLAY_FAIL} -gt 0 ]]; then
+    warn "${DISPLAY_FAIL} display file(s) could not be refreshed — check your network, or re-run from a fresh git clone"
+  fi
+  if unit_exists squarepi-display.service && systemctl is-enabled --quiet squarepi-display 2>/dev/null; then
+    systemctl restart squarepi-display 2>/dev/null || true
+    info "squarepi-display restarted"
+  fi
+else
+  info "Local display not installed — nothing to migrate (see the note at the end of this run)"
+fi
+
+else
+  info "v2.0.0 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v2.0.0 gate ---
+
+# Deliberately NOT version-gated. Someone who skipped the display at 2.0.0
+# should still be told it exists when they update later, rather than the hint
+# having scrolled past on one run months ago.
+DISPLAY_HINT=0
+display_installed || DISPLAY_HINT=1
+
+# =============================================================================
+# ### END v2.0.0 DELTA
 # ###
 # ### >>> The next release's "### vX.Y.Z DELTA" block goes HERE, above this
 # ###     line. Do not add new steps below — steps 9-10 below must always run
@@ -610,9 +704,17 @@ if [[ ${#APPLIED[@]} -gt 0 ]]; then
     echo -e "    ✓ ${line}"
   done
 else
-  echo -e "  ${BOLD}Applied:${NC} nothing new — every delta was already in place."
+  echo -e "  ${BOLD}Applied:${NC} nothing to change here — every delta was either already"
+  echo -e "  in place or targets a feature this system doesn't have installed."
 fi
 echo ""
+if [[ "${DISPLAY_HINT:-0}" == "1" ]]; then
+  echo -e "  ${BOLD}Available but not installed:${NC}"
+  echo -e "    • Local display — ST7735 TFT + KY-040 rotary encoder, 5 screens"
+  echo -e "      including 19 VU meter styles. Needs the hardware wired first."
+  echo -e "      Add it with: ${BOLD}sudo bash install.sh --with-display${NC}"
+  echo ""
+fi
 echo -e "  ${BOLD}Preserved:${NC} your EQ curve, Analog Gain, and BT volume."
 echo ""
 if [[ "${MIXER_UNLOCKED:-0}" == "1" ]]; then

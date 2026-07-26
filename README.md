@@ -1,6 +1,6 @@
 # SquarePi
 
-[![Version](https://img.shields.io/badge/installer-v1.6.3-blue)](https://github.com/sijah/Square_PI/releases)
+[![Version](https://img.shields.io/badge/installer-v2.0.0-blue)](https://github.com/sijah/Square_PI/releases)
 [![License](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.com)
 [![Hardware](https://img.shields.io/badge/hardware-SquarePi-orange)](docs/audio-engine.md)
@@ -25,7 +25,7 @@ One install command sets up the audio driver, music player, web UI, Bluetooth, D
 | Cost | **Under $30** in parts |
 | Protocols | **7** — BT · DLNA · Spotify · AirPlay · USB · Radio · MPD |
 | Setup | **One command** — `sudo bash install.sh` (Bluetooth + EQ UI included) |
-| Control | **Browser UI** — `squarepi.local`, no app install |
+| Control | **Browser UI** — `squarepi.local`, no app install · optional on-device display |
 | Cloud | **None** — fully local, no account, no subscription |
 
 ---
@@ -153,8 +153,43 @@ Green = clear. Red = active. All faults self-clear when the condition resolves.
 | EQ DSP UI | `http://squarepi.local:8081` | Core feature — always installed |
 | MPD (music apps) | `squarepi.local:6600` | Auto-discovered by M.A.L.P, MPDroid, Cantata |
 | DLNA renderer | Appears as `SquarePi` in DLNA apps | With `--with-dlna` |
+| Local display | On the device itself — no network | With `--with-display`, needs the hardware |
 
 No IP address needed — everything is reachable by hostname.
+
+### Local Display (optional hardware)
+
+Wire up a 1.8" ST7735 SPI TFT and a KY-040 rotary encoder and the player gets a front panel — no phone, no browser. Install with `--with-display`.
+
+Nine screens, one encoder, three gestures. Rotate for the screen's continuous action, short press for its discrete one, and **long press (0.6 s) for Menu from Home or Back anywhere else** — so holding the knob always gets you out. Screens return to Home on their own after 20–30 s of no input.
+
+| Screen | Rotate | Short press |
+|---|---|---|
+| Home (Now Playing) | volume | play / pause |
+| Main Menu | move cursor | open the item |
+| Play / Music | scroll the list | play the highlighted entry |
+| Playback Queue | scroll the queue | play that track |
+| EQ Preset | scroll the 13 presets | apply it, then show the curve |
+| VU Meter | volume | open the style browser |
+| VU Style | pick from 19 meter styles | back to the meter |
+| Settings | move cursor | open the item |
+| Network / System Info | — | refresh |
+
+Rotating on Home raises one overlay holding **MPD volume, Bluetooth volume, and track skip** — press moves between the three, rotate acts on the focused one. Volume choice sticks until power cycle; skip does not, so the knob always comes back to volume.
+
+Track titles too long for the panel scroll rather than truncating, after a short pause so the start stays readable. Titles that fit don't move.
+
+Track names display in **Malayalam, Hindi and Tamil** as well as Latin, mixed freely in one line. Menu labels stay in English.
+
+The Play / Music screen is what makes the panel self-sufficient. It lists **Resume Queue** (when tracks are already queued and stopped), **Shuffle All Music**, and your saved MPD playlists — one press starts playing. Without it the display could only control music that something else had already queued, which is no use on a cold boot.
+
+**Volume is one overlay, not two screens.** Turn the knob on Home and it appears over what you were looking at, showing both the MPD and Bluetooth levels with one focused; press switches which one the knob drives, and it hides two seconds after you stop. It doesn't try to guess which source you meant — Bluetooth playback can't be detected reliably, so showing both and letting you choose is honest rather than occasionally wrong.
+
+The VU Meter screen gives twin analog needles fed from MPD's own audio stream, and its style browser gives that meter 19 looks — LED ladders, oscilloscope and goniometer traces, a spectrum, and more. Metering is MPD-only: Bluetooth, AirPlay, and Spotify streams don't pass through MPD, so the meters stay flat for those.
+
+Home also shows what the file actually is — codec, bit depth and sample rate — read from MPD rather than inferred.
+
+Wiring tables, controls, and troubleshooting: [docs/setup.md → Optional: Local display](docs/setup.md#optional-local-display-st7735--ky-040).
 
 ### Sleep Timer
 
@@ -201,11 +236,14 @@ DLNA, Spotify Connect, and AirPlay are opt-in:
 # Add AirPlay
 ... | sudo bash -s -- --with-airplay
 
-# Everything (Bluetooth + EQ UI + DLNA + Spotify + AirPlay)
+# Add the local display (needs the ST7735 + KY-040 hardware wired)
+... | sudo bash -s -- --with-display
+
+# Everything (Bluetooth + EQ UI + DLNA + Spotify + AirPlay + local display)
 ... | sudo bash -s -- --all
 ```
 
-Bluetooth and the EQ web UI are core features — they are always installed and can't be removed. Only DLNA, Spotify, and AirPlay are opt-in.
+Bluetooth and the EQ web UI are core features — they are always installed and can't be removed. Only DLNA, Spotify, AirPlay, and the local display are opt-in.
 
 If a BlueALSA package isn't available on your OS image, the installer logs a warning and continues — the core install never aborts.
 
@@ -216,7 +254,8 @@ git clone https://github.com/sijah/Square_PI.git
 cd Square_PI/squarepi-installer
 
 sudo bash install.sh                      # Bluetooth + EQ UI (always included)
-sudo bash install.sh --all                # everything (+ DLNA, Spotify, AirPlay)
+sudo bash install.sh --with-display       # + the local ST7735 display
+sudo bash install.sh --all                # everything (+ DLNA, Spotify, AirPlay, display)
 ```
 
 ### Optional: auto-reboot and custom hostname
@@ -417,6 +456,19 @@ Hardware designed in **KiCad**.
 | Component | Purpose |
 |---|---|
 | `shairport-sync` | AirPlay receiver |
+
+</details>
+
+<details>
+<summary>With --with-display</summary>
+
+| Component | Purpose |
+|---|---|
+| `/usr/local/lib/squarepi-display/` | Display service module (screens, VU styles, encoder handling) |
+| `squarepi-display.service` | Runs the display at boot |
+| `gpiozero`, `adafruit-blinka`, `adafruit-circuitpython-rgb-display`, `pillow` | Python deps for the ST7735 panel and KY-040 encoder |
+| `dtparam=spi=on` in `config.txt` | Enables the SPI bus the panel needs |
+| `fifo` output in `mpd.conf` | Additive MPD output at `/tmp/mpd.fifo`, feeds the VU meter |
 
 </details>
 

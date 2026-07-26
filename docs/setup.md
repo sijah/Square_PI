@@ -96,7 +96,8 @@ Every install includes **Bluetooth and the visual DSP interface** alongside MPD,
 | `--with-dlna` | Add DLNA/UPnP renderer |
 | `--with-spotify` | Add Spotify Connect |
 | `--with-airplay` | Add AirPlay |
-| `--all` | Everything (+ DLNA, Spotify, AirPlay) |
+| `--with-display` | Add the local display (ST7735 TFT + KY-040 encoder) — needs the hardware wired, see [Optional: Local display](#optional-local-display-st7735--ky-040) |
+| `--all` | Everything (+ DLNA, Spotify, AirPlay, local display) |
 
 `--with-bt` / `--with-eq` are still accepted as harmless no-ops (BT and the EQ UI are always installed). Mix and match the opt-in flags freely:
 ```bash
@@ -215,6 +216,197 @@ mpc update
 ```
 
 Prefer to pin a specific drive manually (by UUID) instead? See **USB Drive → Advanced** in [supported-protocols.md](supported-protocols.md) for the correct per-filesystem fstab lines.
+
+---
+
+## Optional: Local display (ST7735 + KY-040)
+
+A 1.8" ST7735 SPI TFT and a KY-040 rotary encoder give the player a front panel, so it works without a phone or a browser. This is entirely optional — SquarePi is complete without it.
+
+Add it at first install or later on a running system:
+
+```bash
+sudo bash install.sh --with-display
+```
+
+The installer enables SPI, installs the Python dependencies (`gpiozero`, `adafruit-circuitpython-rgb-display`, `adafruit-blinka`, `pillow`), copies the module to `/usr/local/lib/squarepi-display`, adds an additive `fifo` output to `/etc/mpd.conf` to feed the VU meter, and enables a `squarepi-display` service. If the dependencies can't be installed, it warns and skips the display — the core install still finishes.
+
+**A reboot is required afterwards**, because SPI only comes up at boot.
+
+### Wiring — display
+
+| Display pin | Pi GPIO | Physical pin | Notes |
+|---|---|---|---|
+| `VCC` | 3V3 | 1 or 17 | |
+| `GND` | GND | 6, 9, 14, 20, 25, 30, 34, 39 | any ground |
+| `SCL` / `SCK` / `CLK` | GPIO11 (SCLK) | 23 | hardware SPI0 |
+| `SDA` / `MOSI` / `DIN` | GPIO10 (MOSI) | 19 | hardware SPI0 |
+| `CS` | GPIO8 (CE0) | 24 | hardware SPI0 |
+| `DC` / `A0` | GPIO24 | 18 | ordinary GPIO, not SPI |
+| `RES` / `RST` | GPIO25 | 22 | ordinary GPIO, not SPI |
+| `BL` / `LED` | 3V3 | 1 or 17 | backlight, always on |
+
+Some ST7735 boards silkscreen the data/command select pin as **`A0`** rather than `DC`. It is the same signal under a different vendor label — wire it to GPIO24 either way.
+
+Only `CS`, `MOSI`, and `SCLK` are hardware SPI pins and have to be these. `DC`/`A0` and `RES` are ordinary GPIOs; any free pin works if you edit `st7735_driver.py` to match.
+
+### Wiring — encoder
+
+| Encoder pin | Pi GPIO | Physical pin |
+|---|---|---|
+| `CLK` / `A` | GPIO17 | 11 |
+| `DT` / `B` | GPIO27 | 13 |
+| `SW` | GPIO22 | 15 |
+| `+` / `VCC` | 3V3 | 1 or 17 |
+| `GND` | GND | any ground |
+
+### Controls
+
+Three gestures on one encoder. **Long press (0.6 s) is Menu from Home, and Back on every other screen** — so you can always get out of wherever you are by holding the knob.
+
+Home is the default screen and the one you return to.
+
+| Screen | Rotate | Short press | Long press |
+|---|---|---|---|
+| Home (Now Playing) | volume | play / pause | Main Menu |
+| Main Menu | move cursor | open the item | Home |
+| Play / Music | scroll the list | play the highlighted entry | back to Menu |
+| Playback Queue | scroll the queue | play that track | back to Menu |
+| EQ Preset | scroll the 13 presets | apply it (then shows the curve) | back to Menu |
+| VU Meter | volume | open the style browser | back to Menu |
+| VU Style | change meter style (19 of them) | back to VU Meter | back to Menu |
+| Settings | move cursor | open the item | back to Menu |
+| Network / System Info | — | refresh | back to Settings |
+
+Screens fall back to Home on their own after a spell with no input — 20 seconds for most, 30 for Settings — so the panel doesn't sit on a menu indefinitely.
+
+Skipping tracks lives in the volume overlay's third row — see below. To jump to a particular track rather than the next one, use the **Playback Queue** screen.
+
+#### EQ presets on the panel
+
+The EQ Preset screen lists the 13 built-in presets followed by any presets you saved in the EQ web UI, marked with a small tick in the left margin and sorted by name. The list is re-read each time you open the screen, so a preset saved in the browser is there by the time you reach the knob — no restart needed.
+
+The display only ever reads that file; the web UI owns it. Building presets stays a web-UI job, and the panel applies them.
+
+#### Regional language track names
+
+Titles, artists, albums, queue entries and playlist names display correctly in **Malayalam, Hindi (Devanagari) and Tamil**, mixed freely with Latin in the same line. `--with-display` installs `fonts-noto-core`, which carries all three with bold cuts and is hinted for screens — worth having at this size. If a font is missing the affected text shows as empty boxes and everything else keeps working; `journalctl -u squarepi-display` reports which scripts it found at startup.
+
+On a tight SD card, `SQUAREPI_DISPLAY_FONTS=lohit ./install.sh --with-display` installs `fonts-lohit-*` instead: about 2 MB against Noto's ~100 MB. The trade is that Lohit has no bold cut, so a regional title renders in regular weight where a Latin one would be bold. The installer also falls back to Lohit on its own if `fonts-noto-core` can't be fetched.
+
+Fonts are found by name wherever the packages put them, so installing any other Noto or Lohit face by hand works too.
+
+Two limits worth knowing. Menu labels and screen headings stay in English. And if your files' tags aren't UTF-8 — some older ID3v1 tags aren't — they arrive as mojibake and no font can repair that; the fix is retagging the files.
+
+#### Long titles
+
+A title too wide for the panel scrolls: it holds still for about two seconds so you can read the start, then slides left and wraps around, taking roughly 10 seconds for a typical long title and about 20 for an extreme one. Both edges fade out instead of cutting a letter in half. Artist and album stay truncated with an ellipsis — the title is the field whose end usually matters, and two lines moving at once is hard to read.
+
+Titles that fit don't move at all, and the panel goes back to refreshing once a second.
+
+#### Volume
+
+Both volumes live in one overlay rather than on their own screens. Rotate the knob on Home or the VU Meter and it appears over whatever you were looking at, showing **both** levels — MPD and Bluetooth — with one of them focused. Rotate to adjust the focused one, **press to switch which one the knob drives**, and it disappears on its own about two seconds after you stop turning. The choice sticks until the next power cycle, and comes back as MPD after a reboot.
+
+There is deliberately no automatic guessing about which source you meant. Bluetooth playback cannot be detected reliably — some phones never report track metadata, and the Bluetooth volume control itself only exists in ALSA once Bluetooth has actually played — so a knob that routed itself by guesswork would sometimes move the wrong path silently. Showing both levels and letting you pick is honest about it. When Bluetooth has no volume control yet, its row shows `--` and pressing skips over it.
+
+While the overlay is up, press switches rows instead of pausing. Play/pause is available the moment it hides.
+
+#### Next and previous track
+
+The overlay has a third row, **TRACK**, showing your position in the queue (`14/550`). Press round to it and rotate: forward skips ahead, back skips back, and a fast spin moves that many tracks at once rather than firing a skip per click.
+
+It behaves differently from the two volume rows in one deliberate way — **it doesn't stick.** When the overlay hides, the knob goes back to whichever volume row you last actually turned. If TRACK stuck the way the volume choice does, then reaching for volume later would skip tracks instead and you'd lose your place.
+
+The row is skipped over when there's no queue to move through, and shows `SKIP IS MPD ONLY` when the source is Bluetooth: MPD's skip command has no effect on what a phone is playing. Skipping a Bluetooth track from the panel isn't supported yet.
+
+#### Starting music from the display
+
+Home controls whatever is already queued, so on a cold boot with an empty queue its play/pause has nothing to act on. The **Play / Music** screen is what starts playback without reaching for a phone or laptop. It lists, in order:
+
+1. **Resume Queue** — appears only when tracks are already sitting in the queue and playback isn't running. One press starts them, leaving the queue exactly as it is. This is the entry to use when you built a queue in myMPD earlier and just want sound now; it's listed first precisely because it's the one action that destroys nothing.
+2. **Shuffle All Music** — always present. One press clears the queue, adds your whole library, shuffles it, and plays. The "just play something" button.
+3. **Your saved MPD playlists**, sorted alphabetically. One press clears the queue, loads that playlist, and plays it.
+
+The two actions stay accent-coloured even when not highlighted, so they read as actions rather than as more playlist names.
+
+Apart from Resume Queue, pressing an entry *replaces* the queue rather than appending to it. Either way the screen then jumps to Home so you can see that it worked.
+
+The list is flat, with no artist/album/track drilldown — not for want of a back gesture any more, but because a list of a few hundred albums is miserable to scroll with a knob. Anything you want one-press access to should be saved as a playlist in myMPD; the display picks up new playlists the next time you open the screen. With no playlists saved, the screen shows Shuffle All Music on its own. To pick an individual track, use the **Playback Queue** screen.
+
+If MPD can't be reached at all, the screen says so rather than offering buttons that would do nothing.
+
+Related: when a queue is loaded but stopped, Home shows the current track with a **STOPPED — press to play** marker instead of "Nothing playing", so a short press there is also enough to get going.
+
+#### Equalizer
+
+The display applies presets; it does not edit them. Rotate through the 13 built-in presets, press to apply, and the screen confirms with the preset name and a picture of its actual 15-band curve. A dot marks the one currently applied. Building or tweaking a curve is the EQ web UI's job — see [Open the DSP interface](#open-the-dsp-interface-installed-by-default) — because dialling 15 bands with a single knob would be a worse version of a tool you already have.
+
+Only the 13 built-in presets appear here. Presets you save in the web UI are not listed yet.
+
+#### After a power cycle
+
+MPD saves the queue and playback position to `/var/lib/mpd/state`, so queueing music in myMPD and then powering off does not lose it. What you see on the next boot:
+
+| You powered off while… | On the next boot |
+|---|---|
+| Playing, paused, or stopped | Queue is intact and **paused** — press on Now Playing, or use **Resume Queue** on the Music screen |
+| Queue was empty | Nothing to resume; use **Shuffle All Music** or a playlist |
+
+The state file is flushed every 30 s (`state_file_interval`). A clean shutdown always flushes it, so use the Power menu or `sudo poweroff` when convenient — pulling the plug within 30 s of building a queue can still lose it, and then only Shuffle All or a saved playlist will get you going.
+
+**The player never starts playing on its own at boot.** That's `restore_paused "yes"`, and it is deliberate. USB drives are mounted by udev *after* `mpd.service` starts, so a restored queue of USB tracks would have MPD trying to open files that aren't mounted yet and erroring through them. Restoring paused keeps the queue intact and waiting; by the time a human presses anything the drive is long since mounted. If all your music is on the SD card and you would rather it resume playback by itself, set `restore_paused "no"` and restart MPD — re-running `install.sh` regenerates `mpd.conf`, so re-apply it afterwards.
+
+##### If your music is on a USB drive
+
+USB drives are mounted inside MPD's library at `<music_directory>/usb/<device>`, so MPD indexes them with no config change. One consequence is worth knowing about: unmounting a drive refreshes MPD's database, which removes those songs — and MPD drops them from the play queue too, keeping only the track currently playing.
+
+That is correct behaviour when you unplug a drive, but on shutdown it used to destroy the queue. `squarepi-usb-mount@.service` was ordered `After=mpd.service`, and systemd stops units in reverse — so the drive was unmounted while MPD was still running, MPD's `auto_update` inotify watch noticed, and it purged and pruned before saving its state file. The unit is now ordered `Before=mpd.service`, so MPD is stopped first and is already gone when the drive goes away.
+
+If you see an empty queue after every reboot, that ordering is the first thing to check:
+
+```bash
+grep -E '^(Before|After)=' /etc/systemd/system/squarepi-usb-mount@.service
+```
+
+It must read `Before=mpd.service`. If it says `After=`, re-run the installer.
+
+The VU Meter screen and all 19 VU styles only animate while MPD itself is playing — a Bluetooth, AirPlay, or Spotify stream doesn't pass through MPD's fifo, so the meters stay flat for those sources.
+
+### Testing and troubleshooting
+
+Test the parts by hand before trusting the service. Stop the service first, or it will still be holding the GPIO pins:
+
+```bash
+sudo systemctl stop squarepi-display
+cd /usr/local/lib/squarepi-display
+python3 test_tft_hello.py          # display only
+python3 test_encoder_hello.py      # encoder only
+python3 demo_cycle_screens.py      # every screen + real navigation, fake data
+python3 demo_auto_cycle.py         # same screens on a timer, no encoder needed
+```
+
+**Exit these with Ctrl+C, not Ctrl+Z.** Ctrl+Z only suspends the process, and a suspended process keeps its GPIO claim, so the next script fails with `lgpio.error: 'GPIO busy'`. If that happens, find the suspended process (state `Tl`) and kill it:
+
+```bash
+ps aux | grep -i python
+sudo kill -9 <PID>
+```
+
+Then restart the service when you're done: `sudo systemctl start squarepi-display`.
+
+Service logs:
+
+```bash
+systemctl status squarepi-display
+journalctl -u squarepi-display -n 30
+```
+
+If the display works but the VU meter never moves, check that MPD's fifo output is still in place — a later hand-edit of `mpd.conf` can lose it:
+
+```bash
+grep -A5 vu_meter /etc/mpd.conf
+```
 
 ---
 
