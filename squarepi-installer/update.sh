@@ -565,8 +565,8 @@ fi
 # =============================================================================
 
 # =============================================================================
-# ### v1.6.4 DELTA — USB play queue survives a reboot; installer rejects typo'd
-# ### flags
+# ### v1.6.4 DELTA — EQ web UI first-load speed; USB play queue survives a
+# ### reboot; installer rejects typo'd flags
 # ### (released 2026-07-26; brings any pre-1.6.4 install forward)
 # ###
 # ### Gated on version, not just internal state: an install already at 1.6.4+
@@ -584,6 +584,23 @@ USB_MOUNT_SH="/usr/local/bin/squarepi-usb-mount.sh"
 USB_UMOUNT_SH="/usr/local/bin/squarepi-usb-umount.sh"
 
 if version_lt "${CURRENT_VER}" "1.6.4"; then
+
+if [[ -f "${EQ_SERVER_DEST}" ]] || unit_exists squarepi-eq.service; then
+  step "Updating EQ web server (faster first page load)"
+  if fetch_repo_file "eq-server.py" "${EQ_SERVER_DEST}"; then
+    chmod +x "${EQ_SERVER_DEST}"
+    success "eq-server.py updated"
+    APPLIED+=(
+      "EQ web UI loads much faster: the first page request read all 37 amp controls as 37 separate amixer processes, one after another — it is now a single call"
+      "EQ web server is multi-threaded, so the three requests the page fires on load no longer queue behind each other"
+      "Custom EQ presets are written atomically, so a save can no longer be seen half-written (the local display reads that file and would have shown no presets at all)"
+    )
+  else
+    warn "Could not fetch eq-server.py — leaving the existing one in place"
+  fi
+else
+  info "EQ web server not installed — skipping eq-server.py update"
+fi
 
 step "Making the play queue survive a reboot (USB libraries)"
 USB_FIXED=0

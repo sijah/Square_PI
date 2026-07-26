@@ -15,9 +15,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-EQ_SERVER_VER = "1.6.3"
+EQ_SERVER_VER = "1.6.4"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
@@ -99,13 +99,34 @@ def load_custom_presets():
         return {}
 
 def save_custom_presets(data):
+    """Write the preset file atomically.
+
+    Opening the real path "w" truncates it, so a reader that opened the file at
+    the wrong moment saw an empty or half-written document. The local display
+    reads this file too, and it fails soft to "no custom presets" — which looks
+    exactly like the presets having been lost. Write a sibling temp file and
+    rename it instead: os.replace is atomic, so a reader sees either the old
+    file or the new one.
+
+    Callers must hold _PRESETS_LOCK.
+    """
+    tmp = CUSTOM_PRESETS_FILE + ".tmp"
     try:
-        with open(CUSTOM_PRESETS_FILE, "w") as f:
+        with open(tmp, "w") as f:
             json.dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, CUSTOM_PRESETS_FILE)
     except Exception:
-        pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 CUSTOM_PRESETS = load_custom_presets()
+# Guards CUSTOM_PRESETS and the file behind it. The server is threaded, so two
+# saves (or a save and a read) can otherwise overlap mid-mutation.
+_PRESETS_LOCK = threading.Lock()
 
 
 # ── amixer helpers ─────────────────────────────────────────────────────────────
@@ -180,6 +201,83 @@ def amixer_get_enum(control):
     return ""
 
 
+def amixer_contents():
+    """Read every control on the card in ONE amixer call.
+
+    Reading controls one at a time costs a fork+exec+ALSA-open each. A full page
+    load needs 37 of them (15 EQ bands, analog gain, 2 channel gains, 2 enums,
+    4 matrix cells, 13 fault flags) and they run back to back, which is what made
+    the DSP page slow to first paint on a Pi Zero 2W. `amixer contents` dumps the
+    lot in one go.
+
+    Returns {control name: {"values": [int, ...], "items": [str, ...]}}, or {} if
+    the call fails — every caller falls back to its own per-control read, so a
+    parse that comes up empty is slow, never wrong.
+
+    Parsed shape:
+        numid=6,iface=MIXER,name='Analog Gain'
+          ; type=INTEGER,access=rw---R--,values=1,min=0,max=31,step=0
+          : values=11
+        numid=9,iface=MIXER,name='Mixer Mode'
+          ; type=ENUMERATED,access=rw------,values=1,items=4
+          ; Item #0 'Stereo'
+          : values=0
+    For ENUMERATED controls ": values=N" is an index into "items", not the value.
+    """
+    out = _run(["amixer", "-c", CARD, "contents"])
+    if not out:
+        return {}
+    snap = {}
+    current = None
+    for line in out.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("numid=") and "name=" in stripped:
+            name = stripped.split("name=", 1)[1].strip()
+            # Trailing fields after the quoted name are possible; take the quoted run.
+            if name.startswith("'"):
+                name = name[1:].split("'", 1)[0]
+            elif name.startswith('"'):
+                name = name[1:].split('"', 1)[0]
+            current = {"values": [], "items": []}
+            snap[name] = current
+            continue
+        if current is None:
+            continue
+        if stripped.startswith("; Item #"):
+            part = stripped.split("#", 1)[1]
+            if "'" in part:
+                current["items"].append(part.split("'")[1])
+        elif stripped.startswith(": values="):
+            for tok in stripped.split("=", 1)[1].split(","):
+                try:
+                    current["values"].append(int(tok))
+                except ValueError:
+                    pass
+    return snap
+
+
+def snap_int(snap, control, default=None):
+    """Integer value for a control from an amixer_contents() snapshot.
+
+    Falls back to a single-control read when the control is absent from the
+    snapshot (or there is no snapshot), so callers never have to branch.
+    """
+    entry = snap.get(control) if snap else None
+    if entry and entry["values"]:
+        return entry["values"][0]
+    return amixer_get_int(control) if default is None else default
+
+
+def snap_enum(snap, control):
+    """Enum string for a control from a snapshot, or a single-control read."""
+    entry = snap.get(control) if snap else None
+    if entry and entry["values"] and entry["items"]:
+        idx = entry["values"][0]
+        if 0 <= idx < len(entry["items"]):
+            return entry["items"][idx]
+    return amixer_get_enum(control)
+
+
 def amixer_set_enum(control, value):
     """Set an enum control by string value."""
     subprocess.run(
@@ -207,13 +305,13 @@ def power_off_or_reboot(action):
     threading.Thread(target=_halt, daemon=True).start()
 
 
-def get_faults():
-    """Read all fault/warning booleans. Returns dict key→int (0 or 1)."""
-    result = {}
-    for key, ctrl, _ in FAULT_CONTROLS:
-        raw = amixer_get_int(ctrl)
-        result[key] = raw
-    return result
+def get_faults(snap=None):
+    """Read all fault/warning booleans. Returns dict key→int (0 or 1).
+
+    Pass an amixer_contents() snapshot to read all 13 without spawning 13
+    processes; omit it and each is read individually as before.
+    """
+    return {key: snap_int(snap, ctrl) for key, ctrl, _ in FAULT_CONTROLS}
 
 
 # ── Host health (Pi-side, separate from the amp's own hardware faults above) ────
@@ -301,14 +399,14 @@ def get_host_health():
     return {key: fn() for key, _, fn in HOST_HEALTH_CHECKS}
 
 
-def get_balance():
+def get_balance(snap=None):
     """
     Read balance from Channel L/R Gain.
     Returns int in [-20, 20]. Positive = right louder, negative = left louder.
     ALSA range: 0-110 where 110 = 0 dB.
     """
-    l_raw = amixer_get_int("Channel Left Gain")
-    r_raw = amixer_get_int("Channel Right Gain")
+    l_raw = snap_int(snap, "Channel Left Gain")
+    r_raw = snap_int(snap, "Channel Right Gain")
     return max(-20, min(20, r_raw - l_raw))
 
 
@@ -508,22 +606,34 @@ def _update_check_thread():
 
 
 def get_state():
-    """Return all DSP state in one call."""
-    bands = {label: amixer_get(ctrl) for label, ctrl in BANDS}
+    """Return all DSP state in one call.
+
+    Every ALSA read here comes from a single `amixer contents` snapshot. This is
+    the page's first request and it used to spawn 37 amixer processes back to
+    back, which was most of the wait before first paint. If the snapshot comes
+    back empty each helper falls through to its own read, so the page still fills
+    in correctly — just as slowly as it used to.
+
+    BT volume is left out of the snapshot deliberately: "BT Volume" is a softvol
+    control that only exists once something has played over Bluetooth, and
+    get_bt_volume() already handles it being absent.
+    """
+    snap = amixer_contents()
+    bands = {label: snap_int(snap, ctrl) for label, ctrl in BANDS}
     return {
         "bands":       bands,
-        "gain":        amixer_get_int("Analog Gain"),
-        "balance":     get_balance(),
+        "gain":        snap_int(snap, "Analog Gain"),
+        "balance":     get_balance(snap),
         "bt_volume":   get_bt_volume(),
-        "eq_enabled":  amixer_get_enum("Equalizer") != "Off",
-        "mixer_mode":  amixer_get_enum("Mixer Mode") or "Stereo",
+        "eq_enabled":  snap_enum(snap, "Equalizer") != "Off",
+        "mixer_mode":  snap_enum(snap, "Mixer Mode") or "Stereo",
         "matrix": {
-            "l2l": amixer_get_int(MATRIX_CONTROLS["l2l"]),
-            "r2l": amixer_get_int(MATRIX_CONTROLS["r2l"]),
-            "l2r": amixer_get_int(MATRIX_CONTROLS["l2r"]),
-            "r2r": amixer_get_int(MATRIX_CONTROLS["r2r"]),
+            "l2l": snap_int(snap, MATRIX_CONTROLS["l2l"]),
+            "r2l": snap_int(snap, MATRIX_CONTROLS["r2l"]),
+            "l2r": snap_int(snap, MATRIX_CONTROLS["l2r"]),
+            "r2r": snap_int(snap, MATRIX_CONTROLS["r2r"]),
         },
-        "faults": get_faults(),
+        "faults": get_faults(snap),
         "health": get_host_health(),
     }
 
@@ -1796,13 +1906,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json({label: amixer_get(ctrl) for label, ctrl in BANDS})
 
         elif p == "/api/faults":
-            self._json(get_faults())
+            # One snapshot instead of 13 amixer spawns — this one polls every 10s.
+            self._json(get_faults(amixer_contents()))
 
         elif p == "/api/health":
             self._json(get_host_health())
 
         elif p == "/api/custom-presets":
-            self._json(CUSTOM_PRESETS)
+            with _PRESETS_LOCK:
+                self._json(dict(CUSTOM_PRESETS))
 
         elif p == "/api/bt-volume":
             self._json({"volume": get_bt_volume()})
@@ -1881,10 +1993,12 @@ class Handler(BaseHTTPRequestHandler):
         elif p == "/api/custom-preset/save":
             name = str(data.get("name", "")).strip()[:24]
             values = [max(BAND_MIN, min(BAND_MAX, int(v))) for v in data.get("values", [0]*15)]
-            if name and len(values) == 15:
-                CUSTOM_PRESETS[name] = values
-                save_custom_presets(CUSTOM_PRESETS)
-            self._json({"ok": True, "customs": CUSTOM_PRESETS})
+            with _PRESETS_LOCK:
+                if name and len(values) == 15:
+                    CUSTOM_PRESETS[name] = values
+                    save_custom_presets(CUSTOM_PRESETS)
+                snapshot = dict(CUSTOM_PRESETS)
+            self._json({"ok": True, "customs": snapshot})
 
         elif p == "/api/custom-preset/apply":
             values = [max(BAND_MIN, min(BAND_MAX, int(v))) for v in data.get("values", [0]*15)]
@@ -1896,9 +2010,11 @@ class Handler(BaseHTTPRequestHandler):
 
         elif p == "/api/custom-preset/delete":
             name = str(data.get("name", "")).strip()
-            CUSTOM_PRESETS.pop(name, None)
-            save_custom_presets(CUSTOM_PRESETS)
-            self._json({"ok": True, "customs": CUSTOM_PRESETS})
+            with _PRESETS_LOCK:
+                CUSTOM_PRESETS.pop(name, None)
+                save_custom_presets(CUSTOM_PRESETS)
+                snapshot = dict(CUSTOM_PRESETS)
+            self._json({"ok": True, "customs": snapshot})
 
         elif p == "/api/power":
             action = data.get("action")
@@ -1916,7 +2032,13 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     threading.Thread(target=_bt_vol_restore_thread, daemon=True).start()
     threading.Thread(target=_update_check_thread, daemon=True).start()
-    server = HTTPServer(("0.0.0.0", 8081), Handler)
+    # Threading, so one slow request does not hold up the rest of the page. The
+    # page fires three requests at once on load (custom presets, now playing,
+    # full DSP state); single-threaded they queued behind whichever was slowest.
+    # The one piece of shared mutable state, CUSTOM_PRESETS, is guarded by
+    # _PRESETS_LOCK. ALSA reads and writes go out as separate amixer processes,
+    # which the kernel serialises per control.
+    server = ThreadingHTTPServer(("0.0.0.0", 8081), Handler)
     print("[SquarePi DSP] Listening on http://0.0.0.0:8081")
     try:
         server.serve_forever()
