@@ -105,6 +105,23 @@ Every install includes **Bluetooth and the visual DSP interface** alongside MPD,
 
 If a BlueALSA package isn't available on your OS image, the installer warns and continues — the core install never aborts.
 
+An unrecognised flag stops the installer with a list of the valid ones, rather than
+running to completion without the feature you asked for.
+
+### Adding a feature later
+
+Decided you want Spotify after all? Re-run the installer with the flag for the new
+feature. It takes a few minutes, but nothing is lost — your music, playlists, EQ
+settings and paired Bluetooth devices all stay put.
+
+```bash
+cd ~/Square_PI/squarepi-installer && sudo bash install.sh --with-spotify
+```
+
+You only need the flag for what you're **adding**. Anything already installed is
+detected and kept, and the installer prints what it kept so you can see it
+happened. To remove a feature, use `uninstall.sh`.
+
 ### Clone and run locally (alternative)
 
 ```bash

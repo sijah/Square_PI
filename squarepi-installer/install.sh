@@ -101,6 +101,39 @@ RELEASE_FILE="/etc/squarepi-release"
 RESUME_FLAG_FILE="/var/lib/squarepi/resume_on_boot"
 HOSTNAME_REQUESTED="${SQUAREPI_HOSTNAME:-}"
 
+# -----------------------------------------------------------------------------
+# Remember what is already installed
+#
+# The optional-feature flags default to 0 every run, so someone adding one
+# feature to an existing box ("--with-spotify") used to end up writing
+# DLNA_ENABLED=0 over a DLNA install that is still present and running. Nothing
+# was uninstalled -- but /etc/squarepi-release is what the EQ web UI reads to
+# decide which panels to show, so the feature silently disappeared from the UI.
+#
+# Merge instead: a feature already recorded as installed stays installed. Flags
+# are additive, and uninstall.sh remains the way to take something out.
+# -----------------------------------------------------------------------------
+release_flag() {  # release_flag <KEY> -> 1 or 0
+  local val
+  val="$(grep -m1 "^$1=" "${RELEASE_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"[:space:]')"
+  [[ "${val}" == "1" ]] && echo 1 || echo 0
+}
+
+if [[ -f "${RELEASE_FILE}" ]]; then
+  PREV_DLNA=$(release_flag DLNA_ENABLED)
+  PREV_SPOTIFY=$(release_flag SPOTIFY_ENABLED)
+  PREV_AIRPLAY=$(release_flag AIRPLAY_ENABLED)
+
+  KEPT=()
+  [[ ${PREV_DLNA}    -eq 1 && ${INSTALL_DLNA}    -eq 0 ]] && { INSTALL_DLNA=1;    KEPT+=("DLNA"); }
+  [[ ${PREV_SPOTIFY} -eq 1 && ${INSTALL_SPOTIFY} -eq 0 ]] && { INSTALL_SPOTIFY=1; KEPT+=("Spotify"); }
+  [[ ${PREV_AIRPLAY} -eq 1 && ${INSTALL_AIRPLAY} -eq 0 ]] && { INSTALL_AIRPLAY=1; KEPT+=("AirPlay"); }
+
+  if [[ ${#KEPT[@]} -gt 0 ]]; then
+    echo -e "${CYAN}[INFO]${NC} Already installed, keeping: ${KEPT[*]} — pass --with-… only for what you are ADDING"
+  fi
+fi
+
 TAS_I2C_ADDR=""               # Auto-detected (0x2c/0x2d/0x2e/0x2f); override if needed
 TAS_DRIVER_REPO="https://github.com/sonocotta/tas5805m-driver-for-raspbian"
 MPD_MUSIC_DIR="/var/lib/mpd/music"
