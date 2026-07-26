@@ -58,7 +58,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
-TARGET_VER="1.6.6"  # <-- bump this every release (see guide above)
+TARGET_VER="1.6.7"  # <-- bump this every release (see guide above)
 CARD="LouderRaspberry"
 RELEASE_FILE="/etc/squarepi-release"
 EQ_SERVER_DEST="/usr/local/bin/squarepi-eq-server.py"
@@ -852,7 +852,91 @@ fi
 # --- end v1.6.6 gate ---
 
 # =============================================================================
-# ### END v1.6.6 DELTA
+# ### v1.6.7 DELTA — NAS units: break the boot-time ordering cycle that stopped
+# ### myMPD from starting, and protect the play queue on shutdown
+# ### (released 2026-07-26; brings any pre-1.6.7 install forward)
+# ###
+# ### Two defects in the units the DSP UI generated for a network share:
+# ###
+# ### 1. The .automount was written `After=network-online.target`. An automount
+# ###    is implicitly Before=local-fs.target, and network-online is reached late
+# ###    (after sysinit.target), so this closed an ordering cycle. systemd broke
+# ###    it by deleting local-fs.target's start job; myMPD (Requires=local-fs.
+# ###    target) then silently never started — "music plays, no web UI". Fix:
+# ###    strip network-online from the .automount (it needs no network to exist;
+# ###    only the .mount it triggers does). Reproduced + confirmed on hardware.
+# ###
+# ### 2. The .mount lacked Before=mpd.service — the same shutdown-ordering bug the
+# ###    USB mount unit had in 1.6.3. Without it the share is torn down while MPD
+# ###    still watches it, and MPD purges those tracks and saves an emptied queue.
+# ###
+# ### Units are generated at runtime, so they are patched in place here rather
+# ### than re-fetched. A box that never added a share has no units and is skipped.
+# =============================================================================
+if version_lt "${CURRENT_VER}" "1.6.7"; then
+
+if [[ -f "${EQ_SERVER_DEST}" ]] || unit_exists squarepi-eq.service; then
+  step "Updating EQ web server (network share boot-cycle fix)"
+  if fetch_repo_file "eq-server.py" "${EQ_SERVER_DEST}"; then
+    chmod +x "${EQ_SERVER_DEST}"
+    systemctl restart squarepi-eq 2>/dev/null || true
+    success "eq-server.py updated"
+    APPLIED+=(
+      "Network share no longer stops the myMPD web UI from starting at boot — the generated automount formed a systemd ordering cycle that silently dropped myMPD"
+      "Network share now leaves the play queue intact on shutdown (the mount is ordered before MPD stops, as the USB mount already is)"
+      "The NETWORK SHARE card only shows 'Connected' when a share is really mounted, not whenever the automount is merely enabled"
+    )
+  else
+    warn "Could not fetch eq-server.py — future shares unaffected, patching existing units below"
+  fi
+fi
+
+step "Repairing any already-generated network-share units"
+NAS_MOUNT_POINT="/var/lib/mpd/music/nas"
+NAS_MOUNT_UNIT="$(systemd-escape --path --suffix=mount "${NAS_MOUNT_POINT}" 2>/dev/null || true)"
+NAS_AUTO_UNIT="$(systemd-escape --path --suffix=automount "${NAS_MOUNT_POINT}" 2>/dev/null || true)"
+NAS_PATCHED=0
+
+NAS_AUTO_FILE="/etc/systemd/system/${NAS_AUTO_UNIT}"
+if [[ -n "${NAS_AUTO_UNIT}" && -f "${NAS_AUTO_FILE}" ]]; then
+  if grep -qE '^(After|Wants)=network-online\.target' "${NAS_AUTO_FILE}"; then
+    sed -i -e '/^After=network-online\.target$/d' -e '/^Wants=network-online\.target$/d' "${NAS_AUTO_FILE}"
+    info "automount: removed network-online ordering (this was the boot cycle that dropped myMPD)"
+    NAS_PATCHED=1
+  fi
+fi
+
+NAS_MOUNT_FILE="/etc/systemd/system/${NAS_MOUNT_UNIT}"
+if [[ -n "${NAS_MOUNT_UNIT}" && -f "${NAS_MOUNT_FILE}" ]]; then
+  if ! grep -qE '^Before=mpd\.service' "${NAS_MOUNT_FILE}"; then
+    if grep -qE '^Wants=network-online\.target' "${NAS_MOUNT_FILE}"; then
+      sed -i '/^Wants=network-online\.target$/a Before=mpd.service' "${NAS_MOUNT_FILE}"
+    else
+      # No anchor line to append after — insert right under [Unit].
+      sed -i '/^\[Unit\]$/a Before=mpd.service' "${NAS_MOUNT_FILE}"
+    fi
+    info "mount: added Before=mpd.service (protects the queue on shutdown)"
+    NAS_PATCHED=1
+  fi
+fi
+
+if [[ ${NAS_PATCHED} -eq 1 ]]; then
+  systemctl daemon-reload
+  success "Network-share units repaired — the fix takes full effect on the next reboot"
+  APPLIED+=(
+    "Repaired the network-share units already on this box: removed the automount's network-online ordering (the boot cycle) and ordered the mount before MPD stops"
+  )
+else
+  info "No network-share units to repair (none configured, or already fixed)"
+fi
+
+else
+  info "v1.6.7 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v1.6.7 gate ---
+
+# =============================================================================
+# ### END v1.6.7 DELTA
 # ###
 # ### >>> The next release's "### vX.Y.Z DELTA" block goes HERE, above this
 # ###     line. Do not add new steps below — steps 9-10 below must always run

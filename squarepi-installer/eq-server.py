@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-EQ_SERVER_VER = "1.6.6"
+EQ_SERVER_VER = "1.6.7"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
@@ -572,6 +572,14 @@ Description=SquarePi network music share
 Documentation=https://github.com/sijah/SquarePi
 After=network-online.target
 Wants=network-online.target
+# Before, NOT After, mpd.service — the same shutdown-ordering fix the USB mount
+# unit got in 1.6.4. systemd stops units in reverse start order, so a mount that
+# outlives MPD is torn down while MPD is still watching it; MPD's auto_update
+# inotify sees the folder empty, purges those tracks and saves an emptied queue.
+# Ordering Before mpd.service means MPD is stopped first and is already gone when
+# the share goes away. (Ordering only — this does not pull the mount in at boot;
+# it stays automount-triggered.)
+Before=mpd.service
 
 [Mount]
 What=%(what)s
@@ -584,11 +592,19 @@ TimeoutSec=30
 WantedBy=multi-user.target
 """
 
+# NOTE: the automount deliberately carries NO network-online ordering. An
+# automount unit is implicitly Before=local-fs.target (its mountpoint must exist
+# early), and network-online.target is reached late, after sysinit.target — so
+# `After=network-online.target` here closed an ordering cycle
+#   local-fs.target → nas.automount → network-online.target → sysinit.target → local-fs.target
+# which systemd broke by deleting local-fs.target's start job. myMPD (Requires=
+# local-fs.target, no matching After=) then never started — "music plays, no web
+# UI", intermittently, depending on which job systemd cut. Reproduced on hardware
+# 2026-07-26. The automount needs no network to merely EXIST; only the .mount it
+# triggers does, and that unit keeps its network-online deps above.
 NAS_AUTOMOUNT_UNIT_TMPL = """\
 [Unit]
 Description=SquarePi network music share (automount)
-After=network-online.target
-Wants=network-online.target
 
 [Automount]
 Where=%(where)s
@@ -647,10 +663,25 @@ def nas_load_config():
 
 
 def nas_is_mounted():
+    """True only when a REAL share is mounted at the point — not merely the autofs
+    stub the enabled automount leaves there.
+
+    os.path.ismount() returns True for the idle automount point too (autofs is a
+    filesystem, so its st_dev differs from the parent's), so it reported the share
+    "Connected" whenever the automount was enabled — including after a reboot
+    before anything has touched the folder, or while the NAS is switched off. Read
+    /proc/self/mounts and require an actual filesystem there, i.e. anything but
+    autofs. Our mount point contains no spaces, so no octal-unescaping is needed.
+    """
     try:
-        return os.path.ismount(NAS_MOUNT_POINT)
+        with open("/proc/self/mounts") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 3 and parts[1] == NAS_MOUNT_POINT and parts[2] != "autofs":
+                    return True
     except Exception:
         return False
+    return False
 
 
 def nas_status():

@@ -4,6 +4,18 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.6.7] — 2026-07-26
+
+### Fixed
+- **Adding a network share could stop the web UI (myMPD) from coming back after a reboot.** With a share configured, the speaker would sometimes boot with music playing but the myMPD control page refusing to load — and it came and went between reboots, which made it look like several different faults. The cause was the share's automount unit: it was told to wait for the network, but an automount has to be ready very early in boot, before the network exists. That contradiction made systemd quietly drop a core part of the startup sequence to resolve it, and myMPD depended on the part that got dropped. The automount no longer waits for the network — it doesn't need to, because it does nothing until something actually reads the folder, and only *then* does the real mount (which does wait for the network) happen. Reproduced and confirmed on hardware. If you already have a share configured, the SquarePi updater repairs the existing unit in place; the fix applies fully on the next reboot.
+- **A network share could empty the play queue on shutdown.** The share was being disconnected while MPD was still running, so MPD saw the folder vanish, treated those tracks as deleted, and saved an emptied queue — the same fault USB drives had before 1.6.4, now closed for network shares too by stopping MPD first.
+- **The NETWORK SHARE card showed "Connected" when nothing was actually mounted.** The status check treated the always-present automount point as a live mount, so the indicator went green as soon as a share was saved, even after a reboot before the share had been touched or while the NAS was switched off. It now reports connected only when a real share is mounted.
+
+### Known limitation
+- With the NAS powered **off**, its tracks stay listed in the library across a reboot — MPD keeps them from its cache and doesn't re-scan the missing folder (confirmed on hardware) — they simply can't play until the NAS is back on. They only drop out of the library if a rescan (`mpc update`) runs while the share is unreachable; `mpc update nas` restores them once it is back. A share that disappears *while the speaker is running* is the harder case — MPD's live folder-watch notices and purges it — and is tracked separately.
+
+---
+
 ## [1.6.6] — 2026-07-26
 
 ### Fixed
