@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-EQ_SERVER_VER = "1.6.4"
+EQ_SERVER_VER = "1.6.5"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
@@ -351,6 +351,374 @@ def get_faults(snap=None):
     processes; omit it and each is read individually as before.
     """
     return {key: snap_int(snap, ctrl) for key, ctrl, _ in FAULT_CONTROLS}
+
+
+# ── Network share (NAS) ────────────────────────────────────────────────────────
+# Mounts an SMB or NFS share INSIDE the music directory, which is the same trick
+# USB auto-mount uses: MPD picks it up as a subfolder with no mpd.conf change.
+#
+# Deliberately inflexible. The mount point, the filesystem list and the mount
+# options are all fixed here — nothing the browser sends reaches a shell, and
+# every subprocess call is an argument list. The form supplies a host, a share
+# path and credentials, and nothing else.
+#
+# /etc/fstab is left alone on purpose: a bad line there can hang boot, and it is
+# a file users keep their own entries in. A generated .mount + .automount pair
+# is the same thing systemd would synthesise from an x-systemd.automount fstab
+# entry, in a file uninstall.sh can delete cleanly.
+
+NAS_MOUNT_POINT = "/var/lib/mpd/music/nas"
+NAS_CONF_FILE = "/var/lib/squarepi/nas.json"
+NAS_CRED_FILE = "/etc/squarepi-nas.cred"
+NAS_TYPES = ("cifs", "nfs")
+
+# Host: IPv4 or a DNS label run. Deliberately no ".local" advice here — mDNS is
+# not resolvable at mount time, which is the single most common way a hand-
+# written fstab entry fails at boot.
+_NAS_HOST_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
+_NAS_SHARE_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ._-/")
+_NAS_USER_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ._@-")
+
+_NAS_LOCK = threading.Lock()
+
+
+def _nas_clean(value, allowed, maxlen):
+    value = str(value or "").strip()
+    if len(value) > maxlen:
+        return None
+    return value if all(c in allowed for c in value) else None
+
+
+def nas_validate(cfg):
+    """Return (clean_cfg, None) or (None, 'why it was rejected')."""
+    fstype = str(cfg.get("type", "cifs")).strip().lower()
+    if fstype not in NAS_TYPES:
+        return None, "Share type must be SMB or NFS."
+
+    host = _nas_clean(cfg.get("host"), _NAS_HOST_OK, 253)
+    if not host:
+        return None, "Server address is empty or has characters that aren't allowed."
+    if host.endswith(".local"):
+        return None, (".local names can't be resolved when the share is mounted at boot. "
+                      "Use the NAS's IP address instead.")
+
+    share = _nas_clean(cfg.get("share"), _NAS_SHARE_OK, 255)
+    if not share:
+        return None, "Share path is empty or has characters that aren't allowed."
+    share = "/" + share.strip("/")
+    if ".." in share:
+        return None, "Share path can't contain '..'."
+
+    user = _nas_clean(cfg.get("user"), _NAS_USER_OK, 128)
+    if user is None:
+        return None, "Username has characters that aren't allowed."
+
+    password = str(cfg.get("password") or "")
+    if len(password) > 256 or "\n" in password or "\r" in password:
+        return None, "Password is too long or contains a line break."
+
+    return {"type": fstype, "host": host, "share": share,
+            "user": user, "password": password}, None
+
+
+def nas_source(cfg):
+    """The 'what' half of the mount — //host/share for SMB, host:/share for NFS."""
+    if cfg["type"] == "cifs":
+        return "//" + cfg["host"] + cfg["share"]
+    return cfg["host"] + ":" + cfg["share"]
+
+
+def _nas_mpd_ids():
+    """MPD's uid/gid. SMB has no real Unix ownership, so these mount options ARE
+    the ownership — get them wrong and the share mounts but MPD sees nothing."""
+    uid = gid = None
+    try:
+        import pwd
+        uid = pwd.getpwnam("mpd").pw_uid
+    except Exception:
+        pass
+    try:
+        import grp
+        gid = grp.getgrnam("audio").gr_gid
+    except Exception:
+        pass
+    return uid, gid
+
+
+def nas_mount_options(cfg, cred_file=NAS_CRED_FILE):
+    if cfg["type"] == "nfs":
+        # NFS carries real uids on the wire; no mapping to do.
+        return "_netdev,nofail,soft,timeo=100,retrans=2"
+    uid, gid = _nas_mpd_ids()
+    opts = ["credentials=" + cred_file, "vers=3.0",
+            "file_mode=0644", "dir_mode=0755",
+            "_netdev", "nofail", "soft"]
+    if uid is not None:
+        opts.insert(1, "uid=%d" % uid)
+    if gid is not None:
+        opts.insert(2, "gid=%d" % gid)
+    return ",".join(opts)
+
+
+def nas_write_credentials(cfg, path=NAS_CRED_FILE):
+    """Root-only credentials file. Never echoed back by any endpoint."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write("username=%s\npassword=%s\n" % (cfg["user"], cfg["password"]))
+    os.chmod(path, 0o600)
+
+
+def nas_unit_name(suffix, path=NAS_MOUNT_POINT):
+    out = _run(["systemd-escape", "--path", "--suffix=" + suffix, path]).strip()
+    if out:
+        return out
+    # systemd-escape missing shouldn't be fatal — this is the same transform.
+    return path.strip("/").replace("-", "\\x2d").replace("/", "-") + "." + suffix
+
+
+NAS_MOUNT_ERRORS = (
+    ("permission denied",     "The NAS rejected that username or password."),
+    ("logon_failure",         "The NAS rejected that username or password."),
+    ("access_denied",         "That account can't open this share."),
+    ("bad_network_name",      "The server is reachable but has no share by that name."),
+    ("no such file",          "The server is reachable but has no share by that name."),
+    ("host is down",          "No answer from the server. Check the IP address."),
+    ("no route to host",      "No answer from the server. Check the IP address."),
+    ("connection refused",    "The server refused the connection — is file sharing switched on?"),
+    ("timed out",             "The server didn't answer in time."),
+    ("unable to resolve",     "That server name couldn't be resolved. Use an IP address."),
+    ("not found",             "Support for this share type isn't installed on the Pi."),
+    # apt failed during install or update, so the kernel has no helper for this
+    # filesystem. Worth naming the fix — the raw message means nothing.
+    ("unknown filesystem type",
+     "Support for this share type isn't installed. Run the SquarePi updater, or: "
+     "sudo apt install cifs-utils nfs-common"),
+    ("wrong fs type",
+     "Support for this share type isn't installed. Run the SquarePi updater, or: "
+     "sudo apt install cifs-utils nfs-common"),
+)
+
+
+def _nas_explain(stderr):
+    low = (stderr or "").lower()
+    for needle, friendly in NAS_MOUNT_ERRORS:
+        if needle in low:
+            return friendly
+    return (stderr or "The mount failed and gave no reason.").strip().splitlines()[-1][:200]
+
+
+def nas_try_mount(cfg, target, cred_file=NAS_CRED_FILE):
+    """Mount cfg at target. Returns (ok, message). Never raises."""
+    try:
+        proc = subprocess.run(
+            ["mount", "-t", cfg["type"], "-o", nas_mount_options(cfg, cred_file),
+             nas_source(cfg), target],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=45)
+    except subprocess.TimeoutExpired:
+        return False, "The server didn't answer in time."
+    except FileNotFoundError:
+        return False, ("The mount command is missing. Run the SquarePi updater, or: "
+                       "sudo apt install cifs-utils nfs-common")
+    except Exception as exc:
+        return False, str(exc)[:200]
+    if proc.returncode == 0:
+        return True, "Connected."
+    return False, _nas_explain(proc.stdout.decode("utf-8", "replace"))
+
+
+def nas_test(cfg):
+    """Mount to a scratch directory, then unmount. This is the whole point of
+    doing it in a UI: the user sees the real reason instead of an empty folder."""
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="squarepi-nas-")
+    cred = tmp + ".cred"
+    try:
+        # A scratch credentials file, so a failed test never overwrites the
+        # working one already on disk.
+        if cfg["type"] == "cifs":
+            nas_write_credentials(cfg, cred)
+        ok, msg = nas_try_mount(cfg, tmp, cred)
+
+        if ok:
+            try:
+                count = len(os.listdir(tmp))
+                if count:
+                    msg = "Connected — %d item%s visible." % (
+                        count, "" if count == 1 else "s")
+                else:
+                    # A successful mount of an empty share. Say so plainly:
+                    # "0 items visible" reads like something went wrong.
+                    msg = ("Connected, but the folder is empty. "
+                           "The share works — there is just no music in it yet.")
+            except Exception:
+                pass
+            subprocess.run(["umount", "-l", tmp], stderr=subprocess.DEVNULL)
+        return ok, msg
+    finally:
+        for path in (cred,):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        try:
+            os.rmdir(tmp)
+        except OSError:
+            pass
+
+
+NAS_MOUNT_UNIT_TMPL = """\
+[Unit]
+Description=SquarePi network music share
+Documentation=https://github.com/sijah/SquarePi
+After=network-online.target
+Wants=network-online.target
+
+[Mount]
+What=%(what)s
+Where=%(where)s
+Type=%(type)s
+Options=%(options)s
+TimeoutSec=30
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+NAS_AUTOMOUNT_UNIT_TMPL = """\
+[Unit]
+Description=SquarePi network music share (automount)
+After=network-online.target
+Wants=network-online.target
+
+[Automount]
+Where=%(where)s
+# Deliberately NO TimeoutIdleSec. An idle-unmounted autofs path still exists and
+# reads as an EMPTY directory — and MPD's auto_update treats an empty directory as
+# "these files were deleted", purging them from the database, which prunes them
+# from the play queue. An idle timeout would recreate that window every few
+# minutes of quiet. Confirmed on hardware: a share that went away came back to an
+# empty queue. Mounting on first access is still what keeps a sleeping NAS from
+# delaying boot, which is the reason this is an automount at all — it just stays
+# mounted once something has touched it.
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def nas_write_units(cfg):
+    """Write the .mount/.automount pair. Only the automount is enabled, so a NAS
+    that is asleep or absent delays nothing at boot — the mount happens the first
+    time something reads the folder, and retries next time if it fails."""
+    mount_unit = nas_unit_name("mount")
+    auto_unit = nas_unit_name("automount")
+    fields = {"what": nas_source(cfg), "where": NAS_MOUNT_POINT,
+              "type": cfg["type"], "options": nas_mount_options(cfg)}
+    with open("/etc/systemd/system/" + mount_unit, "w") as f:
+        f.write(NAS_MOUNT_UNIT_TMPL % fields)
+    with open("/etc/systemd/system/" + auto_unit, "w") as f:
+        f.write(NAS_AUTOMOUNT_UNIT_TMPL % {"where": NAS_MOUNT_POINT})
+    return mount_unit, auto_unit
+
+
+def nas_save_config(cfg):
+    """Everything except the password, which lives only in the root-only
+    credentials file."""
+    record = {k: cfg[k] for k in ("type", "host", "share", "user")}
+    try:
+        os.makedirs(os.path.dirname(NAS_CONF_FILE), exist_ok=True)
+        tmp = NAS_CONF_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(record, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, NAS_CONF_FILE)
+    except Exception:
+        pass
+
+
+def nas_load_config():
+    try:
+        with open(NAS_CONF_FILE) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def nas_is_mounted():
+    try:
+        return os.path.ismount(NAS_MOUNT_POINT)
+    except Exception:
+        return False
+
+
+def nas_status():
+    cfg = nas_load_config()
+    return {
+        "configured": bool(cfg),
+        "type":  (cfg or {}).get("type", "cifs"),
+        "host":  (cfg or {}).get("host", ""),
+        "share": (cfg or {}).get("share", ""),
+        "user":  (cfg or {}).get("user", ""),
+        "mounted": nas_is_mounted(),
+        "mount_point": NAS_MOUNT_POINT,
+    }
+
+
+def nas_connect(cfg):
+    """Validate, prove it mounts, then persist. Nothing is written to disk until
+    the share has actually answered — a saved config always worked at least once."""
+    with _NAS_LOCK:
+        ok, msg = nas_test(cfg)
+        if not ok:
+            return False, msg
+
+        try:
+            os.makedirs(NAS_MOUNT_POINT, exist_ok=True)
+            if cfg["type"] == "cifs":
+                nas_write_credentials(cfg)
+            else:
+                try:
+                    os.unlink(NAS_CRED_FILE)
+                except OSError:
+                    pass
+            mount_unit, auto_unit = nas_write_units(cfg)
+        except Exception as exc:
+            return False, "Couldn't write the mount settings: %s" % str(exc)[:120]
+
+        subprocess.run(["systemctl", "daemon-reload"], stderr=subprocess.DEVNULL)
+        subprocess.run(["systemctl", "enable", "--now", auto_unit],
+                       stderr=subprocess.DEVNULL)
+        subprocess.run(["systemctl", "start", mount_unit], stderr=subprocess.DEVNULL)
+
+        nas_save_config(cfg)
+        subprocess.run(["mpc", "update", "nas"], stderr=subprocess.DEVNULL)
+        return True, msg + " Scanning for music…"
+
+
+def nas_disconnect():
+    with _NAS_LOCK:
+        mount_unit = nas_unit_name("mount")
+        auto_unit = nas_unit_name("automount")
+        for unit in (auto_unit, mount_unit):
+            subprocess.run(["systemctl", "disable", "--now", unit],
+                           stderr=subprocess.DEVNULL)
+        subprocess.run(["umount", "-l", NAS_MOUNT_POINT], stderr=subprocess.DEVNULL)
+        for path in ("/etc/systemd/system/" + mount_unit,
+                     "/etc/systemd/system/" + auto_unit,
+                     NAS_CRED_FILE, NAS_CONF_FILE):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        subprocess.run(["systemctl", "daemon-reload"], stderr=subprocess.DEVNULL)
+        try:
+            os.rmdir(NAS_MOUNT_POINT)
+        except OSError:
+            pass
+        subprocess.run(["mpc", "update", "nas"], stderr=subprocess.DEVNULL)
+        return True, "Disconnected."
 
 
 # ── Host health (Pi-side, separate from the amp's own hardware faults above) ────
@@ -859,6 +1227,19 @@ HTML = r"""<!DOCTYPE html>
   .sys-led.err { background:var(--red); box-shadow:0 0 6px var(--red); animation:blink 1s infinite; }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
   .faults-section-title { font-size:0.6rem; color:var(--label); letter-spacing:0.12em; text-transform:uppercase; margin:10px 0 8px; }
+  /* Cap the field column: an IP address or a share name in a full-width box
+     looks like the form is waiting for a sentence. */
+  .nas-form { display:grid; grid-template-columns:auto minmax(0,320px); gap:8px 10px; align-items:center; margin-bottom:11px; }
+  .nas-form label { font-size:0.6rem; color:var(--mut); letter-spacing:0.1em; text-transform:uppercase; }
+  .nas-form input, .nas-form select { background:var(--sur); color:var(--txt); border:1px solid var(--bdr); border-radius:2px; padding:6px 11px; font-size:0.65rem; font-family:inherit; outline:none; letter-spacing:0.04em; width:100%; box-sizing:border-box; }
+  .nas-form input:focus, .nas-form select:focus { border-color:var(--acc); }
+  .nas-form input::placeholder { color:var(--mut); }
+  .nas-btn-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:9px; }
+  .nas-msg { font-size:0.6rem; line-height:1.5; min-height:16px; letter-spacing:0.04em; margin-bottom:8px; }
+  .nas-msg.ok { color:var(--grn); }
+  .nas-msg.err { color:var(--red); }
+  .nas-msg.busy { color:var(--mut); }
+  .nas-state { display:flex; align-items:center; gap:7px; font-size:0.6rem; color:var(--mut); letter-spacing:0.06em; }
   .hint-line { font-size:0.58rem; color:var(--mut); line-height:1.5; margin:-4px 0 10px; max-width:46ch; }
   .faults-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-bottom:13px; }
   .fault-item { display:flex; flex-direction:column; align-items:center; gap:5px; background:var(--sur); border:1px solid var(--bdr); border-radius:4px; padding:8px 4px; }
@@ -992,6 +1373,9 @@ HTML = r"""<!DOCTYPE html>
     <div class="nav-divider"></div>
     <div class="nav-item" data-s="system" onclick="navTo('system')">
       <span class="nav-icon">&#9633;</span>SYSTEM
+    </div>
+    <div class="nav-item" data-s="nas" onclick="navTo('nas')">
+      <span class="nav-icon">&#9673;</span>NETWORK
     </div>
   </div>
   <div class="device-info">
@@ -1226,6 +1610,46 @@ HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<div class="card" id="card-nas">
+  <div class="card-hdr">
+    <span class="card-title" onclick="toggleCard('nas'); loadNas();"><span class="card-caret">&#x25BA;</span> NETWORK SHARE</span>
+    <div class="eq-hdr-ctrls">
+      <div class="nas-state"><span class="fdot na" id="nas-led"></span><span id="nas-state-txt">Not set up</span></div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="hint-line">Play music straight off a NAS or a shared folder on your
+      computer. It appears in myMPD as <strong>nas</strong>, alongside your library.</div>
+    <div class="nas-form">
+      <label for="nas-type">Type</label>
+      <select id="nas-type" onchange="onNasType()">
+        <option value="cifs">SMB / Windows share</option>
+        <option value="nfs">NFS</option>
+      </select>
+      <label for="nas-host">Server</label>
+      <input type="text" id="nas-host" maxlength="253" placeholder="192.168.1.50">
+      <label for="nas-share">Folder</label>
+      <input type="text" id="nas-share" maxlength="255" placeholder="Music">
+      <label for="nas-user" id="nas-user-lbl">User</label>
+      <input type="text" id="nas-user" maxlength="128" placeholder="leave empty for a public share" autocomplete="off">
+      <label for="nas-pass" id="nas-pass-lbl">Password</label>
+      <input type="password" id="nas-pass" maxlength="256" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="new-password">
+    </div>
+    <div class="nas-msg" id="nas-msg"></div>
+    <div class="nas-btn-row">
+      <button class="save-btn" id="nas-test-btn" onclick="nasTest()">Test connection</button>
+      <button class="save-btn" id="nas-connect-btn" onclick="nasConnect()">&#9632; Connect &amp; save</button>
+      <button class="save-btn" id="nas-rescan-btn" onclick="nasRescan()">Rescan</button>
+      <button class="save-btn" id="nas-remove-btn" onclick="nasDisconnect()">Remove</button>
+    </div>
+    <div class="hint-line">Use the server's IP address rather than a
+      <em>.local</em> name &mdash; names can't be looked up early enough when the
+      Pi reconnects on its own after a restart. The share is only mounted when
+      something reads it, so a NAS that's asleep or switched off never holds up
+      startup.</div>
+  </div>
+</div>
+
 </div><!-- .content -->
 
 </div><!-- .columns -->
@@ -1346,9 +1770,17 @@ function toggleCard(id){
   // display:none that's 0x0, so redraw once real dimensions are back.
   if (id === 'eq' && !isCollapsed && typeof drawCurve === 'function') drawCurve();
 }
+// Cards that start folded away the first time this browser opens the page.
+// Only applied when no preference has been stored yet — after that the user's
+// own choice wins, including choosing to leave one open.
+const DEFAULT_COLLAPSED = ['nas'];
 function initCollapsed(){
-  let collapsed = [];
-  try { collapsed = JSON.parse(localStorage.getItem('squarepi-collapsed') || '[]'); } catch(e){}
+  let collapsed = null;
+  try { collapsed = JSON.parse(localStorage.getItem('squarepi-collapsed')); } catch(e){}
+  if (!Array.isArray(collapsed)) {
+    collapsed = DEFAULT_COLLAPSED.slice();
+    try { localStorage.setItem('squarepi-collapsed', JSON.stringify(collapsed)); } catch(e){}
+  }
   collapsed.forEach(id => {
     const card = document.getElementById('card-' + id);
     if (card) card.classList.add('collapsed');
@@ -1390,6 +1822,90 @@ function pollNowPlaying(){
 function animateNpVu(){
   const vu=document.getElementById('np-vu');
   if(vu && vu.style.display!=='none'){ [].forEach.call(vu.children,b=>{ b.style.height=(4+Math.random()*14)+'px'; }); }
+}
+
+// ── Network share ───────────────────────────────────────────────────────────────
+// Fetched lazily when the card is first opened — never on page load.
+let nasLoaded = false, nasBusy = false;
+
+function nasMsg(text, kind){
+  const el = document.getElementById('nas-msg');
+  if (el) { el.textContent = text || ''; el.className = 'nas-msg' + (kind ? ' ' + kind : ''); }
+}
+function nasSetBusy(on){
+  nasBusy = on;
+  ['nas-test-btn','nas-connect-btn','nas-rescan-btn','nas-remove-btn'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = on;
+  });
+}
+function onNasType(){
+  // NFS has no username or password — the server maps by uid.
+  const smb = document.getElementById('nas-type').value === 'cifs';
+  ['nas-user','nas-pass','nas-user-lbl','nas-pass-lbl'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = smb ? '' : 'none';
+  });
+  const host = document.getElementById('nas-host');
+  const share = document.getElementById('nas-share');
+  if (host)  host.placeholder  = '192.168.1.50';
+  if (share) share.placeholder = smb ? 'Music' : '/volume1/Music';
+}
+function paintNas(s){
+  const led = document.getElementById('nas-led');
+  const txt = document.getElementById('nas-state-txt');
+  if (led) led.className = 'fdot ' + (s.mounted ? '' : (s.configured ? 'warn' : 'na'));
+  if (txt) txt.textContent = s.mounted ? 'Connected'
+         : (s.configured ? 'Saved, not mounted' : 'Not set up');
+  const rm = document.getElementById('nas-remove-btn');
+  const rs = document.getElementById('nas-rescan-btn');
+  if (rm) rm.style.display = s.configured ? '' : 'none';
+  if (rs) rs.style.display = s.configured ? '' : 'none';
+  if (s.configured) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el && !el.value) el.value = v; };
+    const type = document.getElementById('nas-type');
+    if (type) { type.value = s.type || 'cifs'; }
+    set('nas-host', s.host || '');
+    set('nas-share', (s.share || '').replace(/^\//, ''));
+    set('nas-user', s.user || '');
+  }
+  onNasType();
+}
+function loadNas(){
+  if (nasLoaded) return;
+  nasLoaded = true;
+  fetch('/api/nas').then(r => r.json()).then(paintNas).catch(() => { nasLoaded = false; });
+}
+function nasPayload(){
+  return {
+    type:  document.getElementById('nas-type').value,
+    host:  document.getElementById('nas-host').value.trim(),
+    share: document.getElementById('nas-share').value.trim(),
+    user:  document.getElementById('nas-user').value.trim(),
+    password: document.getElementById('nas-pass').value,
+  };
+}
+function nasCall(url, payload, busyText){
+  if (nasBusy) return;
+  nasSetBusy(true);
+  nasMsg(busyText, 'busy');
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify(payload || {})})
+    .then(r => r.json())
+    .then(d => {
+      nasMsg(d.message || (d.ok ? 'Done.' : 'That did not work.'), d.ok ? 'ok' : 'err');
+      if (d.status) paintNas(d.status);
+    })
+    .catch(() => nasMsg('The speaker stopped responding — reload the page.', 'err'))
+    .then(() => nasSetBusy(false));
+}
+function nasTest(){ nasCall('/api/nas/test', nasPayload(), 'Trying to reach the server…'); }
+function nasConnect(){ nasCall('/api/nas/connect', nasPayload(), 'Connecting…'); }
+function nasRescan(){ nasCall('/api/nas/rescan', {}, 'Rescanning…'); }
+function nasDisconnect(){
+  if (!confirm('Remove this network share? Your music stays on the NAS — it just stops appearing on the speaker.')) return;
+  document.getElementById('nas-pass').value = '';
+  nasCall('/api/nas/disconnect', {}, 'Removing…');
 }
 
 // ── A/B compare ─────────────────────────────────────────────────────────────────
@@ -1873,6 +2389,10 @@ function loadSysInfo() {
 // ── Sidebar nav ────────────────────────────────────────────────────────────────
 function navTo(id) {
   const el = document.getElementById('card-' + id);
+  // Jumping to a card the user has folded away should open it — otherwise the
+  // click scrolls to a title bar and looks like it did nothing.
+  if (el && el.classList.contains('collapsed')) toggleCard(id);
+  if (id === 'nas') loadNas();
   if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   const ni = document.querySelector('.nav-item[data-s="' + id + '"]');
@@ -1888,6 +2408,8 @@ function toggleBypass() {
 
 initTheme();
 initCollapsed();
+// Only if the user left the share card open — otherwise it stays unfetched.
+if (!document.getElementById('card-nas').classList.contains('collapsed')) loadNas();
 renderSparklines();
 initCurveDrag();
 loadCustomPresets();
@@ -1985,6 +2507,12 @@ class Handler(BaseHTTPRequestHandler):
         elif p == "/api/bt-volume":
             self._json({"volume": get_bt_volume()})
 
+        elif p == "/api/nas":
+            # Deliberately NOT part of /api/state: that runs once on page load
+            # and was just cut to a single amixer call. A filesystem probe
+            # belongs behind its own lazy fetch, not in front of the EQ.
+            self._json(nas_status())
+
         elif p == "/api/nowplaying":
             self._json(get_now_playing())
 
@@ -2051,6 +2579,30 @@ class Handler(BaseHTTPRequestHandler):
             pct = max(0, min(100, int(data.get("value", 70))))
             set_bt_volume(pct)
             self._json({"ok": True})
+
+        elif p == "/api/nas/test":
+            cfg, err = nas_validate(data)
+            if err:
+                self._json({"ok": False, "message": err})
+            else:
+                ok, msg = nas_test(cfg)
+                self._json({"ok": ok, "message": msg})
+
+        elif p == "/api/nas/connect":
+            cfg, err = nas_validate(data)
+            if err:
+                self._json({"ok": False, "message": err})
+            else:
+                ok, msg = nas_connect(cfg)
+                self._json({"ok": ok, "message": msg, "status": nas_status()})
+
+        elif p == "/api/nas/disconnect":
+            ok, msg = nas_disconnect()
+            self._json({"ok": ok, "message": msg, "status": nas_status()})
+
+        elif p == "/api/nas/rescan":
+            subprocess.run(["mpc", "update", "nas"], stderr=subprocess.DEVNULL)
+            self._json({"ok": True, "message": "Rescanning…"})
 
         elif p == "/api/resume-on-boot":
             enabled = set_resume_on_boot(bool(data.get("enabled", True)))

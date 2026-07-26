@@ -89,7 +89,7 @@ fi
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.6.4"
+INSTALLER_VER="1.6.5"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -722,6 +722,13 @@ apt-get install -y -qq exfatprogs 2>/dev/null || \
   warn "exfatprogs unavailable — exFAT USB drives may not mount"
 apt-get install -y -qq ntfs-3g 2>/dev/null || \
   warn "ntfs-3g unavailable — NTFS USB drives may not mount"
+
+# Network shares (DSP UI → NETWORK SHARE). Installed here rather than behind a
+# flag: they are small, and without them the web form can only fail.
+apt-get install -y -qq cifs-utils 2>/dev/null || \
+  warn "cifs-utils unavailable — SMB/Windows network shares will not mount"
+apt-get install -y -qq nfs-common 2>/dev/null || \
+  warn "nfs-common unavailable — NFS network shares will not mount"
 
 # Drives are mounted INSIDE MPD's library (<music>/usb/<dev>) so MPD scans them
 # with no mpd.conf change and the built-in library is preserved.

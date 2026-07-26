@@ -58,7 +58,7 @@ detach_usb_drives() {
 # Banner
 # -----------------------------------------------------------------------------
 echo -e "${BOLD}"
-INSTALLER_VER="1.6.4"
+INSTALLER_VER="1.6.5"
 
 echo "  ╔══════════════════════════════════════════════╗"
 echo "  ║         SquarePi Software Uninstaller        ║"
@@ -347,6 +347,21 @@ for svc in squarepi-resume squarepi-resume-mark; do
 done
 rm -f /usr/local/bin/squarepi-resume.sh /usr/local/bin/squarepi-resume-mark.sh
 rm -f /run/squarepi-resume /var/lib/squarepi/resume_on_boot
+
+# Network share. The units are generated at runtime by the DSP UI, so their
+# names are derived the same way it derives them rather than hardcoded.
+NAS_MOUNT_POINT="/var/lib/mpd/music/nas"
+NAS_MOUNT_UNIT="$(systemd-escape --path --suffix=mount "${NAS_MOUNT_POINT}" 2>/dev/null || true)"
+NAS_AUTO_UNIT="$(systemd-escape --path --suffix=automount "${NAS_MOUNT_POINT}" 2>/dev/null || true)"
+for unit in "${NAS_AUTO_UNIT}" "${NAS_MOUNT_UNIT}"; do
+  [[ -n "${unit}" ]] || continue
+  systemctl disable --now "${unit}" 2>/dev/null || true
+  rm -f "/etc/systemd/system/${unit}"
+done
+umount -l "${NAS_MOUNT_POINT}" 2>/dev/null || true
+rmdir "${NAS_MOUNT_POINT}" 2>/dev/null || true
+rm -f /etc/squarepi-nas.cred /var/lib/squarepi/nas.json
+
 rm -f /var/lib/mympd/scripts/EQ*.lua
 rm -f /var/lib/mympd/scripts/Power_Restart.lua /var/lib/mympd/scripts/Power_Shutdown.lua
 systemctl daemon-reload
