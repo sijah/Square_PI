@@ -58,7 +58,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
-TARGET_VER="1.6.5"  # <-- bump this every release (see guide above)
+TARGET_VER="1.6.6"  # <-- bump this every release (see guide above)
 CARD="LouderRaspberry"
 RELEASE_FILE="/etc/squarepi-release"
 EQ_SERVER_DEST="/usr/local/bin/squarepi-eq-server.py"
@@ -823,7 +823,36 @@ fi
 # --- end v1.6.5 gate ---
 
 # =============================================================================
-# ### END v1.6.5 DELTA
+# ### v1.6.6 DELTA — network share form layout fix
+# ### (released 2026-07-26; brings any pre-1.6.6 install forward)
+# ###
+# ### Cosmetic, and a re-fetch of eq-server.py is the whole migration. Nothing
+# ### on disk changes, so an install that never opens the share card sees no
+# ### difference beyond the version number.
+# =============================================================================
+if version_lt "${CURRENT_VER}" "1.6.6"; then
+
+if [[ -f "${EQ_SERVER_DEST}" ]] || unit_exists squarepi-eq.service; then
+  step "Updating EQ web server (network share layout fix)"
+  if fetch_repo_file "eq-server.py" "${EQ_SERVER_DEST}"; then
+    chmod +x "${EQ_SERVER_DEST}"
+    systemctl restart squarepi-eq 2>/dev/null || true
+    success "eq-server.py updated"
+    APPLIED+=(
+      "NETWORK SHARE fields sit beside their labels again instead of being pushed to the right edge of the card"
+    )
+  else
+    warn "Could not fetch eq-server.py — layout fix not applied"
+  fi
+fi
+
+else
+  info "v1.6.6 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v1.6.6 gate ---
+
+# =============================================================================
+# ### END v1.6.6 DELTA
 # ###
 # ### >>> The next release's "### vX.Y.Z DELTA" block goes HERE, above this
 # ###     line. Do not add new steps below — steps 9-10 below must always run

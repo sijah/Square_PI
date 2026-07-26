@@ -4,6 +4,17 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.6.6] — 2026-07-26
+
+### Fixed
+### Added
+- **A dedicated network share guide**, [docs/network-share.md](docs/network-share.md). Setup instructions per server type (Synology/QNAP, Windows, macOS, Samba on another Pi), a troubleshooting table covering every error the card can report, what to check when a share mounts but myMPD stays empty, stutter causes, the files and units involved, and security guidance. The share content that was scattered across three documents now has one place to point people at.
+
+### Fixed
+- **Network share fields were pushed to the far right of the card.** The width cap that stops an IP address sitting in a box wide enough for a sentence was applied to the form's label column rather than to the fields themselves. A CSS grid column sized `auto` absorbs whatever space is left over, so the labels stretched and carried every input across to the right edge, far from the label describing it. The cap now sits on the fields.
+
+---
+
 ## [1.6.5] — 2026-07-26
 
 ### Added

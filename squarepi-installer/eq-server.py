@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-EQ_SERVER_VER = "1.6.5"
+EQ_SERVER_VER = "1.6.6"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"

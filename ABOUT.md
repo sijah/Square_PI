@@ -174,6 +174,7 @@ squarepi-installer/
 docs/
   audio-engine.md    — deep dive on SquarePi Audio Engine™
   supported-protocols.md
+  network-share.md     — NAS / shared folder guide
   setup.md
 README.md
 ABOUT.md             — this file

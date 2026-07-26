@@ -183,6 +183,8 @@ SMB passwords are stored on the Pi in a root-only credentials file, which is wha
 
 **Remove** unmounts the share, deletes the units and credentials, and forgets the settings. Nothing on the NAS is touched.
 
+Per-server setup instructions (Synology, Windows, macOS, Samba), a full troubleshooting table, and security notes: **[network-share.md](network-share.md)**.
+
 ---
 
 ## Internet Radio

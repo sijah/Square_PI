@@ -247,6 +247,8 @@ For SMB, add the username and password the NAS expects; leave both empty if the 
 
 Press **Test connection** first — it tries the share and tells you what happened, including how many items it could see. Then **Connect & save**. The share appears in myMPD as `nas` within a few seconds.
 
+Setting one up on a Synology, Windows, macOS or Samba box, or hitting an error? See the dedicated guide: **[network-share.md](network-share.md)**.
+
 Use the **IP address, not a `.local` name**. Names can't be looked up early enough when the Pi reconnects to the share on its own after a restart, so the form rejects them. If you don't know the IP, your router's device list will show it.
 
 A few things worth knowing:
