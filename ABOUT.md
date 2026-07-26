@@ -4,7 +4,7 @@
 
 ---
 
-SquarePi is an open-source Raspberry Pi HAT that turns any Pi into a 2×30W hi-fi wireless speaker system — playable from Bluetooth, Spotify, AirPlay, DLNA, USB, and internet radio, all controlled from a browser with no app install.
+SquarePi is an open-source Raspberry Pi HAT that turns any Pi into a 2×30W hi-fi wireless speaker system — playable from Bluetooth, Spotify, AirPlay, DLNA, USB, a network share, and internet radio, all controlled from a browser with no app install.
 
 > *From square wave to every corner.*
 
@@ -66,6 +66,7 @@ Multiple simultaneous sources — Bluetooth from a phone and DLNA from a laptop 
 | Spotify Connect | Native Spotify app control, 320kbps, Premium required |
 | AirPlay | iPhone, iPad, Mac, no Apple account needed |
 | USB Drive | Mount and scan with `mpc update`, FAT32/exFAT/ext4 |
+| Network Share | NAS or a shared folder over SMB or NFS, set up in the browser |
 | Internet Radio | Built-in via MPD, add streams in myMPD |
 | MPD clients | Any MPD-compatible app, auto-discovered via Zeroconf |
 
@@ -141,7 +142,7 @@ Requires Raspberry Pi OS Lite — Bookworm (Debian 12) or Trixie (Debian 13).
 | Account required | **None** | Sonos account | Amazon account |
 | Data collection | **None** | Yes | Yes |
 | Subscription | **None** | Some features | Some features |
-| Protocols | **7** (BT/DLNA/USB/Radio/MPD play concurrently; Spotify & AirPlay pause MPD while active) | Limited | Limited |
+| Protocols | **8** (BT/DLNA/USB/NAS/Radio/MPD play concurrently; Spotify & AirPlay pause MPD while active) | Limited | Limited |
 | EQ | **15-band hardware DSP** | 3-band app sliders | 3-band app sliders |
 | 48kHz/24-bit upscaling | **SquarePi Upscaler™** | No | No |
 | Open source | **Fully (GPLv3)** | No | No |

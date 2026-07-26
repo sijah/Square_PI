@@ -4,6 +4,21 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.6.5] — 2026-07-26
+
+### Added
+- **Play music from a network share, set up in the web UI.** A **NETWORK SHARE** card in the DSP interface connects the speaker to a NAS or a shared folder on a computer — SMB/Windows shares and NFS. Fill in the server's IP address, the folder name and (for SMB) a username and password, and it appears in myMPD as `nas` alongside the built-in library. Previously this meant an SSH session, installing `cifs-utils` by hand and writing an `/etc/fstab` line, where a single mistake either produced an empty folder with no explanation or stopped the Pi from booting.
+
+  **Test connection** mounts the share, reports what it found, and unmounts again, so a wrong password says so instead of leaving a folder that silently stays empty. Nothing is saved until a connection has actually succeeded. The two mistakes that made hand-written entries fail are handled rather than documented: MPD's own user and group are looked up and applied as the mount's ownership — SMB has no real Unix ownership, so those options *are* the ownership, and getting them wrong is what produces a share that `pi` can read and MPD cannot — and `.local` server names are rejected with an explanation, because they cannot be resolved at the point the share is mounted after a restart.
+
+  The share is mounted only when something reads it, so a NAS that is asleep, switched off or simply slow never delays startup — and once mounted it stays mounted, which matters more than it sounds: an unmounted automount path reads as an empty folder, and MPD treats an empty folder as files that have been deleted. `cifs-utils` and `nfs-common` are now installed as standard.
+
+  If the NAS does go away while the speaker is on, those tracks disappear from myMPD and from the play queue, because MPD can no longer see them. Running `mpc update nas` once the NAS is back restores everything. This is the same behaviour as pulling a USB drive mid-play, and it is the price of MPD picking up new files by itself.
+
+  `/etc/fstab` is deliberately left untouched; SquarePi writes its own systemd mount unit, which `uninstall.sh` removes cleanly. A hand-written fstab entry, if you already have one, keeps working and is not interfered with. SMB passwords are stored on the Pi in a root-only credentials file — unavoidable for an unattended mount, and the same thing an fstab setup does — and are never sent back to the browser.
+
+---
+
 ## [1.6.4] — 2026-07-26
 
 ### Added
