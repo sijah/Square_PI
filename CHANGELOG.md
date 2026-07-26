@@ -20,7 +20,7 @@ All notable changes to the SquarePi installer are documented here.
 - **Typo'd installer flags were silently ignored.** `--with spotify` (two words) or `--with_spotify` used to sail straight through: the install succeeded, said nothing, and simply lacked the feature that was asked for. Unrecognised arguments are now a hard error that lists the valid flags. `--with-bt` and `--with-eq` remain accepted no-ops.
 
 ### Changed
-- **MPD restores paused instead of playing.** USB drives are mounted by udev *after* `mpd.service` starts, so a restored queue of USB tracks would otherwise have MPD erroring through files that aren't there yet. The queue now comes back intact and waiting for a press of play. Side benefit: the speaker never starts playing on its own at boot.
+- **MPD restores paused instead of playing.** USB drives are mounted by udev *after* `mpd.service` starts, so a restored queue of USB tracks would otherwise have MPD erroring through files that aren't there yet. The queue now comes back intact and waiting. This is what makes resume-after-restart safe: rather than MPD starting the moment it loads, playback is started deliberately, a few seconds later, once the files are actually reachable. With resume switched off, the queue simply waits for you to press play.
 
 ---
 

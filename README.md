@@ -112,6 +112,7 @@ Open `http://squarepi.local:8081` for the full real-time DSP control panel.
 - **Mixer Mode** — `Stereo` / `Mono` / `Left` / `Right` (crossfeed matrix via separate L2L / R2L / L2R / R2R gain controls)
 - **Save to chip** — settings survive power cycles (`alsactl store`)
 - **Power menu** — Restart / Shut down the Pi from the UI (mutes the amp first, then halts); the same two actions are also available as one-tap tiles in myMPD under Scripts
+- **Resume after restart** — if the power goes out mid-song, the same track picks up where it left off on the next boot; on by default, switch it off under SYSTEM → Startup (applies to your own library, not Bluetooth or AirPlay)
 
 Plus a few quality-of-life touches:
 
