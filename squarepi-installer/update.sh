@@ -58,7 +58,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
-TARGET_VER="1.6.3"  # <-- bump this every release (see guide above)
+TARGET_VER="1.6.4"  # <-- bump this every release (see guide above)
 CARD="LouderRaspberry"
 RELEASE_FILE="/etc/squarepi-release"
 EQ_SERVER_DEST="/usr/local/bin/squarepi-eq-server.py"
@@ -562,6 +562,91 @@ fi
 
 # =============================================================================
 # ### END v1.6.3 DELTA
+# =============================================================================
+
+# =============================================================================
+# ### v1.6.4 DELTA — USB play queue survives a reboot; installer rejects typo'd
+# ### flags
+# ### (released 2026-07-26; brings any pre-1.6.4 install forward)
+# ###
+# ### Gated on version, not just internal state: an install already at 1.6.4+
+# ### skips this whole block on every future run.
+# ###
+# ### The flag-validation half of this release lives entirely in install.sh and
+# ### needs no migration. What follows is the USB queue fix, which is four
+# ### coordinated changes to files install.sh generates on the box. They are
+# ### patched in place rather than re-fetched: these files are written by
+# ### heredoc, not stored in the repo, and the mount root is whatever the
+# ### original install chose.
+# =============================================================================
+USB_MOUNT_UNIT="/etc/systemd/system/squarepi-usb-mount@.service"
+USB_MOUNT_SH="/usr/local/bin/squarepi-usb-mount.sh"
+USB_UMOUNT_SH="/usr/local/bin/squarepi-usb-umount.sh"
+
+if version_lt "${CURRENT_VER}" "1.6.4"; then
+
+step "Making the play queue survive a reboot (USB libraries)"
+USB_FIXED=0
+
+# 1of4 — MPD flushed the queue to disk only every 120s by default, so a power
+# cut just after queueing lost it regardless of anything else here.
+if [[ -f /etc/mpd.conf ]]; then
+  if ! grep -qE '^[[:space:]]*state_file_interval' /etc/mpd.conf; then
+    sed -i '/^state_file[[:space:]]/a state_file_interval "30"' /etc/mpd.conf
+    info "mpd.conf: state_file_interval set to 30s (was MPD's 120s default)"
+    USB_FIXED=1
+  fi
+  # 2of4 — USB drives mount after mpd starts, so a restored queue of USB tracks
+  # would have MPD erroring through files that are not there yet.
+  if ! grep -qE '^[[:space:]]*restore_paused' /etc/mpd.conf; then
+    sed -i '/^state_file[[:space:]]/a restore_paused     "yes"' /etc/mpd.conf
+    info "mpd.conf: restore_paused enabled — MPD comes back paused, not playing"
+    USB_FIXED=1
+  fi
+fi
+
+# 3of4 — the root cause. systemd stops units in reverse order, so After=mpd
+# tore the mount down while MPD was still up; MPD's inotify watch saw the drive
+# vanish, purged those songs, and pruned them from the queue it then saved.
+if [[ -f "${USB_MOUNT_UNIT}" ]] && grep -qE '^After=mpd\.service' "${USB_MOUNT_UNIT}"; then
+  sed -i 's#^After=mpd\.service#Before=mpd.service#' "${USB_MOUNT_UNIT}"
+  info "USB mount unit reordered Before=mpd.service (was After=, which emptied the queue on shutdown)"
+  USB_FIXED=1
+fi
+
+# 4of4 — belt and braces on both helpers: never refresh the database while MPD
+# is down (boot) or on the way out (shutdown).
+if [[ -f "${USB_MOUNT_SH}" ]] && ! grep -q 'is-active --quiet mpd' "${USB_MOUNT_SH}"; then
+  sed -i 's#^[[:space:]]*mpc update "usb/\$1".*#  if systemctl is-active --quiet mpd; then mpc update "usb/$1" >/dev/null 2>\&1 || true; fi#' "${USB_MOUNT_SH}"
+  info "USB mount helper no longer blocks on a stopped MPD at boot"
+  USB_FIXED=1
+fi
+
+if [[ -f "${USB_UMOUNT_SH}" ]] && ! grep -q 'is-system-running' "${USB_UMOUNT_SH}"; then
+  sed -i 's#^[[:space:]]*mpc update "usb".*#[[ "$(systemctl is-system-running 2>/dev/null)" == "stopping" ]] || mpc update "usb" >/dev/null 2>\&1 || true#' "${USB_UMOUNT_SH}"
+  info "USB unmount helper skips the database refresh during shutdown"
+  USB_FIXED=1
+fi
+
+if [[ ${USB_FIXED} -eq 1 ]]; then
+  systemctl daemon-reload
+  success "USB queue-persistence fix applied"
+  APPLIED+=(
+    "The play queue now survives a reboot when your music is on a USB drive — previously the drive was unmounted while MPD was still running, so MPD purged those songs and saved an emptied queue"
+    "MPD restores paused instead of playing, so a restored queue waits for the USB drive to mount rather than erroring through missing files (and the speaker no longer starts on its own at boot)"
+    "MPD flushes the queue to disk every 30s instead of every 120s, so less is lost to a power cut"
+  )
+else
+  info "Nothing to patch here — no USB auto-mount files found, or the fix is already in place"
+fi
+
+else
+  info "v1.6.4 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v1.6.4 gate ---
+
+# =============================================================================
+# ### END v1.6.4 DELTA
 # ###
 # ### >>> The next release's "### vX.Y.Z DELTA" block goes HERE, above this
 # ###     line. Do not add new steps below — steps 9-10 below must always run

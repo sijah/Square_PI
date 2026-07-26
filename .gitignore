@@ -22,3 +22,9 @@ __pycache__/
 
 # Generated architecture diagrams
 docs/diagrams/
+
+# drawio autosave backups
+.$*.bkp
+
+# Knowledge-graph tool output
+graphify-out/

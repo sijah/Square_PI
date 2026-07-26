@@ -50,19 +50,46 @@ INSTALL_EQ=1
 INSTALL_DLNA=0
 INSTALL_SPOTIFY=0
 INSTALL_AIRPLAY=0
+#
+# Unrecognised arguments are a hard error, not a shrug. These flags are usually
+# typed by hand into a long `curl … | sudo bash -s -- …` line, and the failure
+# mode of ignoring a typo is the worst kind: the install succeeds, says nothing,
+# and simply lacks the feature that was asked for. "--with spotify" (two words)
+# and "--with_spotify" both used to sail straight through.
+UNKNOWN_ARGS=()
 for arg in "$@"; do
-  [[ "$arg" == "--with-dlna"    ]] && INSTALL_DLNA=1
-  [[ "$arg" == "--with-spotify" ]] && INSTALL_SPOTIFY=1
-  [[ "$arg" == "--with-airplay" ]] && INSTALL_AIRPLAY=1
-  if [[ "$arg" == "--all" ]]; then
-    INSTALL_DLNA=1; INSTALL_SPOTIFY=1; INSTALL_AIRPLAY=1
-  fi
+  case "$arg" in
+    --with-dlna)         INSTALL_DLNA=1 ;;
+    --with-spotify)      INSTALL_SPOTIFY=1 ;;
+    --with-airplay)      INSTALL_AIRPLAY=1 ;;
+    --all)               INSTALL_DLNA=1; INSTALL_SPOTIFY=1; INSTALL_AIRPLAY=1 ;;
+    --with-bt|--with-eq) ;;  # accepted no-ops (see above) — BT and EQ are always installed
+    --)                  ;;  # conventional end-of-options marker, harmless
+    *)                   UNKNOWN_ARGS+=("$arg") ;;
+  esac
 done
+
+if [[ ${#UNKNOWN_ARGS[@]} -gt 0 ]]; then
+  echo -e "${RED}[ERROR]${NC} Unrecognised argument(s): ${UNKNOWN_ARGS[*]}"
+  echo ""
+  echo "  Valid flags (each is a single word — note the hyphens):"
+  echo "    --with-dlna       Add DLNA/UPnP renderer"
+  echo "    --with-spotify    Add Spotify Connect"
+  echo "    --with-airplay    Add AirPlay"
+  echo "    --all             Everything above"
+  echo ""
+  echo "  Bluetooth and the EQ web UI are always installed — no flag needed."
+  echo ""
+  echo "  Example:"
+  echo "    sudo bash install.sh --with-spotify"
+  echo ""
+  exit 1
+fi
 
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.6.3"
+INSTALLER_VER="1.6.4"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -420,6 +447,18 @@ playlist_directory "/var/lib/mpd/playlists"
 db_file            "/var/lib/mpd/tag_cache"
 sticker_file       "/var/lib/mpd/sticker.db"
 state_file         "/var/lib/mpd/state"
+# How often the queue + playback position are flushed to state_file. MPD's
+# default is 120s, which means yanking the power right after queueing tracks
+# loses them. 30s narrows that window; the file is a few KB, so the extra writes
+# are noise.
+state_file_interval "30"
+# Come back paused rather than playing. MPD's default ("no") resumes playback
+# during startup -- but USB drives are mounted by udev AFTER mpd.service starts,
+# so a restored queue of USB tracks would have MPD erroring through files that
+# aren't mounted yet. Restoring paused means the queue is intact and waiting, and
+# a press of play starts it once the drive is up. Side benefit: the speaker never
+# starts playing on its own at boot.
+restore_paused     "yes"
 log_file           "/var/log/mpd/mpd.log"
 
 user               "mpd"
@@ -673,7 +712,14 @@ case "\$fstype" in
 esac
 mkdir -p "\$mp"
 if mount -t "\$fstype" \${opts:+-o "\$opts"} "\$dev" "\$mp"; then
-  mpc update "usb/\$1" >/dev/null 2>&1 || true
+  # Only refresh the database if MPD is actually up. This unit is ordered
+  # Before=mpd.service, so at boot it runs while MPD is still down -- and mpc
+  # blocking on a daemon that isn't listening delayed boot by minutes. No refresh
+  # is needed then anyway: the tag cache already lists the drive's songs, and once
+  # MPD starts, auto_update's inotify watch keeps up with any changes.
+  if systemctl is-active --quiet mpd; then
+    mpc update "usb/\$1" >/dev/null 2>&1 || true
+  fi
 else
   rmdir "\$mp" 2>/dev/null || true
 fi
@@ -682,9 +728,21 @@ chmod +x /usr/local/bin/squarepi-usb-mount.sh
 
 cat > /usr/local/bin/squarepi-usb-umount.sh <<EOF
 #!/bin/bash
+# SquarePi USB unmount helper (systemd/udev-triggered).
 mp="${USB_MOUNT_ROOT}/\$1"
 umount -l "\$mp" 2>/dev/null || true
 rmdir "\$mp" 2>/dev/null || true
+
+# Skip the database refresh while the system is shutting down. This unit is
+# ordered After=mpd.service, so systemd stops it BEFORE mpd -- and refreshing
+# here made MPD purge every song on the drive, which prunes those songs from the
+# play queue (it keeps only the one currently playing). MPD then saved that
+# emptied queue to its state_file, which is why the queue never survived a reboot
+# for anyone with music on USB. Nobody browses the library on the way down, and
+# the next boot's mount runs "mpc update usb/<dev>" anyway.
+if [[ "\$(systemctl is-system-running 2>/dev/null)" == "stopping" ]]; then
+  exit 0
+fi
 mpc update "usb" >/dev/null 2>&1 || true
 EOF
 chmod +x /usr/local/bin/squarepi-usb-umount.sh
@@ -693,7 +751,15 @@ chmod +x /usr/local/bin/squarepi-usb-umount.sh
 cat > /etc/systemd/system/squarepi-usb-mount@.service <<'EOF'
 [Unit]
 Description=SquarePi USB auto-mount for %i
-After=mpd.service
+# Before, NOT After. systemd stops units in reverse order, so "After=mpd.service"
+# meant this unit was torn down while MPD was still running -- and MPD (with
+# auto_update's inotify watch on the mount point) reacted to the drive vanishing
+# by purging every song on it from the database, which prunes them from the play
+# queue. MPD then saved that emptied queue, so the queue never survived a reboot.
+# Ordering Before mpd.service means MPD is stopped first and is already gone when
+# the drive goes away. As a bonus, at boot MPD waits for the mount when udev has
+# already queued it, so the restored queue's files are present from the start.
+Before=mpd.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes

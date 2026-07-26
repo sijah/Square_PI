@@ -4,6 +4,17 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.6.4] — 2026-07-26
+
+### Fixed
+- **The play queue never survived a reboot when your music was on a USB drive.** systemd stops units in reverse start order, so the USB mount unit — ordered `After=mpd.service` — was torn down while MPD was still running. MPD's `auto_update` inotify watch saw the drive disappear, purged every song on it from the database, and pruning those songs from the play queue left only whatever was playing. MPD then wrote that emptied queue to its state file. Four coordinated changes fix it: the mount unit is now ordered `Before=mpd.service` so MPD is stopped first; the unmount helper skips its database refresh while the system is shutting down; the mount helper only refreshes when MPD is actually running (at boot it now runs while MPD is still down, and blocking on a daemon that isn't listening delayed boot by minutes); and MPD flushes its state every 30s rather than the 120s default, so a power cut loses less.
+- **Typo'd installer flags were silently ignored.** `--with spotify` (two words) or `--with_spotify` used to sail straight through: the install succeeded, said nothing, and simply lacked the feature that was asked for. Unrecognised arguments are now a hard error that lists the valid flags. `--with-bt` and `--with-eq` remain accepted no-ops.
+
+### Changed
+- **MPD restores paused instead of playing.** USB drives are mounted by udev *after* `mpd.service` starts, so a restored queue of USB tracks would otherwise have MPD erroring through files that aren't there yet. The queue now comes back intact and waiting for a press of play. Side benefit: the speaker never starts playing on its own at boot.
+
+---
+
 ## [1.6.3] — 2026-07-15
 
 ### Fixed
