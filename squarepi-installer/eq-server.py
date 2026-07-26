@@ -1227,11 +1227,11 @@ HTML = r"""<!DOCTYPE html>
   .sys-led.err { background:var(--red); box-shadow:0 0 6px var(--red); animation:blink 1s infinite; }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
   .faults-section-title { font-size:0.6rem; color:var(--label); letter-spacing:0.12em; text-transform:uppercase; margin:10px 0 8px; }
-  /* Cap the field column: an IP address or a share name in a full-width box
-     looks like the form is waiting for a sentence. */
-  .nas-form { display:grid; grid-template-columns:auto minmax(0,320px); gap:8px 10px; align-items:center; margin-bottom:11px; }
+  .nas-form { display:grid; grid-template-columns:auto 1fr; gap:8px 10px; align-items:center; margin-bottom:11px; }
   .nas-form label { font-size:0.6rem; color:var(--mut); letter-spacing:0.1em; text-transform:uppercase; }
-  .nas-form input, .nas-form select { background:var(--sur); color:var(--txt); border:1px solid var(--bdr); border-radius:2px; padding:6px 11px; font-size:0.65rem; font-family:inherit; outline:none; letter-spacing:0.04em; width:100%; box-sizing:border-box; }
+  /* max-width on the FIELD, not on the grid track: an `auto` label track
+     absorbs leftover space and shoves the inputs to the right edge. */
+  .nas-form input, .nas-form select { background:var(--sur); color:var(--txt); border:1px solid var(--bdr); border-radius:2px; padding:6px 11px; font-size:0.65rem; font-family:inherit; outline:none; letter-spacing:0.04em; width:100%; max-width:340px; box-sizing:border-box; }
   .nas-form input:focus, .nas-form select:focus { border-color:var(--acc); }
   .nas-form input::placeholder { color:var(--mut); }
   .nas-btn-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:9px; }
