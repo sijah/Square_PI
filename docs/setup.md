@@ -229,6 +229,39 @@ Prefer to pin a specific drive manually (by UUID) instead? See **USB Drive → A
 
 ---
 
+## Resume after a restart
+
+If the power goes out while music is playing, SquarePi picks the same track back
+up on the next boot — same position in the song, same volume, same queue. This is
+on by default.
+
+It applies to your own music library only. Bluetooth, AirPlay and Spotify are
+controlled by the phone or laptop that sent the audio, so there is nothing on the
+SquarePi end to resume — start those from the sending device as usual.
+
+Playback resumes only if music was actually playing when the box went down. If you
+paused it, or stopped it, or the queue was empty, it stays quiet and waits for you.
+
+To turn it off, open the DSP UI and use **SYSTEM → Startup → Resume playback after
+restart**. Over SSH:
+
+```bash
+echo 0 | sudo tee /var/lib/squarepi/resume_on_boot
+```
+
+A few things worth knowing:
+
+- **Music on a USB drive still works.** The drive is mounted a moment after MPD
+  starts, so resume waits for the file to actually be there before playing.
+- **If the drive is missing**, nothing plays. The queue is still loaded and paused
+  — plug the drive back in and press play.
+- **If a phone is already connected over Bluetooth** when the Pi boots, resume
+  stands down so it doesn't start on top of whatever you're about to play.
+- **It gives up after about a minute.** If MPD or the drive never turn up in that
+  window, the queue stays paused rather than playing something unexpected.
+
+---
+
 ## Optional: Custom hostname and branding
 
 ```bash
@@ -399,6 +432,8 @@ Prompts before removing MPD music data and before rebooting. Music files are not
 | `squarepi-eq` | EQ web server | `systemctl status squarepi-eq` |
 | `squarepi-alsa-restore` | Restores EQ state on boot | `systemctl status squarepi-alsa-restore` |
 | `squarepi-eq-init` | First-boot EQ flat init | `systemctl status squarepi-eq-init` |
+| `squarepi-resume-mark` | Records pre-boot playback state | `systemctl status squarepi-resume-mark` |
+| `squarepi-resume` | Resumes playback after a restart | `systemctl status squarepi-resume` |
 | `bluetooth` | Bluetooth stack | `systemctl status bluetooth` |
 | `bluealsa` | BT audio routing | `systemctl status bluealsa` |
 | `squarepi-bt-agent` | Auto-pair agent | `systemctl status squarepi-bt-agent` |

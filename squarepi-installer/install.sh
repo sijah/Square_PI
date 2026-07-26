@@ -96,6 +96,9 @@ BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
 PROJECT_URL="${SQUAREPI_PROJECT_URL:-https://github.com/sijah/Square_PI}"
 SUPPORT_URL="${SQUAREPI_SUPPORT_URL:-${PROJECT_URL}/issues}"
 RELEASE_FILE="/etc/squarepi-release"
+# 1 = press play again after a restart if MPD was playing when the box went down.
+# Toggled from the EQ web UI (SYSTEM card); see section 15b.
+RESUME_FLAG_FILE="/var/lib/squarepi/resume_on_boot"
 HOSTNAME_REQUESTED="${SQUAREPI_HOSTNAME:-}"
 
 TAS_I2C_ADDR=""               # Auto-detected (0x2c/0x2d/0x2e/0x2f); override if needed
@@ -778,6 +781,137 @@ EOF
 systemctl daemon-reload
 udevadm control --reload-rules 2>/dev/null || true
 success "USB auto-mount ready — plug a drive in and it appears in MPD under 'usb'"
+
+# -----------------------------------------------------------------------------
+# 15b. Resume playback after a restart (local library only)
+#
+# What survives a reboot already: the queue, the current track, its elapsed
+# position and MPD's volume, all in /var/lib/mpd/state. What does not is the
+# fact that it was PLAYING -- mpd.conf sets restore_paused "yes", because USB
+# drives are mounted by udev after mpd.service starts and resuming straight into
+# files that are not mounted yet just errors through the queue.
+#
+# So this is two units. The first reads the pre-boot state file BEFORE MPD can
+# rewrite it; the second presses play once it is actually safe.
+#
+# Why read a file instead of writing a marker at shutdown: a pulled plug runs no
+# shutdown hook, and a power cut is the main case this feature is for. The state
+# file is flushed every 30s and survives a hard cut.
+#
+# Bluetooth, AirPlay, Spotify and DLNA are deliberately out of scope -- those are
+# driven by the remote device, and there is nothing on this end to resume.
+# -----------------------------------------------------------------------------
+step "Installing resume-after-restart service"
+
+mkdir -p /var/lib/squarepi
+[[ -f "${RESUME_FLAG_FILE}" ]] || echo "1" > "${RESUME_FLAG_FILE}"
+
+cat > /usr/local/bin/squarepi-resume-mark.sh <<EOF
+#!/bin/bash
+# Runs BEFORE mpd.service. Records whether MPD was playing when the system last
+# went down, because MPD is about to overwrite that with "pause" (restore_paused).
+STATE_FILE="/var/lib/mpd/state"
+MARKER="/run/squarepi-resume"
+
+rm -f "\${MARKER}"
+[[ -f "\${STATE_FILE}" ]] || exit 0
+if grep -qE '^state: play\$' "\${STATE_FILE}"; then
+  touch "\${MARKER}"
+fi
+exit 0
+EOF
+chmod +x /usr/local/bin/squarepi-resume-mark.sh
+
+cat > /usr/local/bin/squarepi-resume.sh <<EOF
+#!/bin/bash
+# Runs AFTER mpd.service. Presses play, but only once it is safe to.
+MARKER="/run/squarepi-resume"
+FLAG="${RESUME_FLAG_FILE}"
+DEADLINE=\$((SECONDS + 60))
+
+# Always clear the marker, whatever happens below: a resume that could not
+# complete this boot must not fire on the next one.
+cleanup() { rm -f "\${MARKER}"; }
+trap cleanup EXIT
+
+[[ -f "\${MARKER}" ]] || exit 0
+[[ "\$(cat "\${FLAG}" 2>/dev/null)" == "1" ]] || exit 0
+
+# Wait for MPD to answer. It is ordered before us, but "started" and "accepting
+# connections" are not the same instant.
+while ! mpc status >/dev/null 2>&1; do
+  (( SECONDS < DEADLINE )) || exit 0
+  sleep 2
+done
+
+# Nothing loaded means nothing to resume -- an empty queue, or a stop.
+[[ -n "\$(mpc current 2>/dev/null)" ]] || exit 0
+
+# Do not start over the top of a phone. A device connected this early almost
+# certainly auto-reconnected and is the thing the user is listening to. This is a
+# heuristic -- connected is not the same as playing -- but erring towards "stay
+# quiet" is the right way to be wrong here: the queue is still loaded and paused,
+# and one press of play gets it back.
+if bluetoothctl devices Connected 2>/dev/null | grep -q .; then
+  exit 0
+fi
+
+# Wait for the file itself. This is the USB case: udev mounts the drive after
+# mpd starts, so the queue is restored before its files exist. A stream (http://)
+# has no local path and needs no wait.
+REL="\$(mpc -f %file% current 2>/dev/null | head -n1)"
+case "\${REL}" in
+  http://*|https://*|"") ;;
+  *)
+    while [[ ! -e "${MPD_MUSIC_DIR}/\${REL}" ]]; do
+      (( SECONDS < DEADLINE )) || exit 0   # drive never showed up -- stay paused
+      sleep 2
+    done
+    ;;
+esac
+
+mpc play >/dev/null 2>&1 || true
+exit 0
+EOF
+chmod +x /usr/local/bin/squarepi-resume.sh
+
+cat > /etc/systemd/system/squarepi-resume-mark.service <<'EOF'
+[Unit]
+Description=SquarePi — record whether MPD was playing before this boot
+# Must read /var/lib/mpd/state before MPD rewrites it.
+Before=mpd.service
+After=local-fs.target
+ConditionPathExists=/var/lib/mpd/state
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/squarepi-resume-mark.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/squarepi-resume.service <<'EOF'
+[Unit]
+Description=SquarePi — resume playback after a restart
+After=mpd.service squarepi-alsa-restore.service
+Wants=mpd.service
+
+[Service]
+Type=oneshot
+# The script polls for up to 60s; give systemd room beyond that before it calls
+# the unit failed.
+TimeoutStartSec=120
+ExecStart=/usr/local/bin/squarepi-resume.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable squarepi-resume-mark 2>/dev/null || true
+systemctl enable squarepi-resume 2>/dev/null || true
+success "Playback will resume after a restart (local library only)"
 
 # -----------------------------------------------------------------------------
 # 16. First-boot EQ initialisation (flat, runs once after driver loads)

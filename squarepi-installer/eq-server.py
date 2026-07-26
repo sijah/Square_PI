@@ -22,6 +22,9 @@ EQ_SERVER_VER = "1.6.4"
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
 BT_VOL_FILE = "/var/lib/squarepi/bt_volume"
+# "1" = press play again after a restart, if MPD was playing when the box went
+# down. squarepi-resume.service reads this; the SYSTEM card toggles it.
+RESUME_FLAG_FILE = "/var/lib/squarepi/resume_on_boot"
 
 RELEASE_FILE = "/etc/squarepi-release"
 # Releases aren't published as GitHub Releases (releases/latest returns a stale
@@ -284,6 +287,42 @@ def amixer_set_enum(control, value):
         ["amixer", "-c", CARD, "sset", control, value],
         stderr=subprocess.DEVNULL
     )
+
+
+def get_resume_on_boot():
+    """True if playback should resume after a restart. Defaults to on.
+
+    A missing file means an install that predates the feature, or one where
+    /var/lib/squarepi was cleared — both should behave like a fresh install,
+    which has it enabled.
+    """
+    try:
+        with open(RESUME_FLAG_FILE) as f:
+            return f.read().strip() == "1"
+    except FileNotFoundError:
+        return True
+    except Exception:
+        # Unreadable for any other reason: treat it as on, matching a fresh
+        # install, rather than silently disabling a feature the user enabled.
+        return True
+
+
+def set_resume_on_boot(enabled):
+    """Persist the resume-on-restart flag. Returns what was actually stored."""
+    try:
+        os.makedirs(os.path.dirname(RESUME_FLAG_FILE), exist_ok=True)
+        tmp = RESUME_FLAG_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            f.write("1" if enabled else "0")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, RESUME_FLAG_FILE)
+    except Exception:
+        # Never let a failed write take the endpoint down with it. The caller
+        # re-reads and reports what is actually stored, so the UI snaps back to
+        # the truth instead of showing a change that did not happen.
+        pass
+    return get_resume_on_boot()
 
 
 def power_off_or_reboot(action):
@@ -635,6 +674,9 @@ def get_state():
         },
         "faults": get_faults(snap),
         "health": get_host_health(),
+        # Rides along here rather than in its own request, so the SYSTEM card's
+        # toggle costs the page nothing extra on load.
+        "resume_on_boot": get_resume_on_boot(),
     }
 
 
@@ -817,6 +859,7 @@ HTML = r"""<!DOCTYPE html>
   .sys-led.err { background:var(--red); box-shadow:0 0 6px var(--red); animation:blink 1s infinite; }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
   .faults-section-title { font-size:0.6rem; color:var(--label); letter-spacing:0.12em; text-transform:uppercase; margin:10px 0 8px; }
+  .hint-line { font-size:0.58rem; color:var(--mut); line-height:1.5; margin:-4px 0 10px; max-width:46ch; }
   .faults-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-bottom:13px; }
   .fault-item { display:flex; flex-direction:column; align-items:center; gap:5px; background:var(--sur); border:1px solid var(--bdr); border-radius:4px; padding:8px 4px; }
   .fdot { width:8px; height:8px; border-radius:50%; background:var(--grn); box-shadow:0 0 5px var(--grn); flex-shrink:0; transition:all 0.3s; }
@@ -1168,6 +1211,15 @@ HTML = r"""<!DOCTYPE html>
     <div class="faults-grid" id="faults-grid"></div>
     <div class="faults-section-title">Host Health</div>
     <div class="faults-grid" id="health-grid"></div>
+    <div class="faults-section-title">Startup</div>
+    <div class="toggle-row">
+      <span class="toggle-lbl">Resume playback after restart</span>
+      <button class="tog" id="resume-on"  onclick="setResumeOnBoot(true)">ON</button>
+      <button class="tog" id="resume-off" onclick="setResumeOnBoot(false)">OFF</button>
+    </div>
+    <div class="hint-line">Picks up where it left off if the power goes out mid-song.
+      Applies to your own music library only &mdash; Bluetooth, AirPlay and Spotify
+      are controlled by the device that sent them.</div>
     <div class="save-row">
       <span class="status" id="status"></span>
     </div>
@@ -1657,6 +1709,19 @@ function setEqBypass(on) {
   post('/api/eq-bypass', {enabled: on});
 }
 
+// ── Resume playback after restart ──────────────────────────────────────────────
+function paintResumeOnBoot(on) {
+  const a = document.getElementById('resume-on'), b = document.getElementById('resume-off');
+  if (a) a.classList.toggle('active', on);
+  if (b) b.classList.toggle('active', !on);
+}
+function setResumeOnBoot(on) {
+  paintResumeOnBoot(on);
+  post('/api/resume-on-boot', {enabled: on});
+}
+// No loader of its own: the flag rides along in /api/status, so the toggle costs
+// the page nothing extra on load.
+
 // ── Gain & Balance ─────────────────────────────────────────────────────────────
 function setGainDisplay(v) {
   const db = ((parseInt(v) - 31) * 0.5).toFixed(1);
@@ -1790,6 +1855,7 @@ function loadState() {
     buildFaults(s.faults ?? {});
     buildHealth(s.health ?? {});
     updateHealthLed(s.faults ?? {}, s.health ?? {});
+    paintResumeOnBoot(s.resume_on_boot !== false);
     abInit();
     suppressDirty = false;
   }).catch(() => { buildEq(null); buildFaults(null); buildHealth(null); suppressDirty = false; });
@@ -1985,6 +2051,10 @@ class Handler(BaseHTTPRequestHandler):
             pct = max(0, min(100, int(data.get("value", 70))))
             set_bt_volume(pct)
             self._json({"ok": True})
+
+        elif p == "/api/resume-on-boot":
+            enabled = set_resume_on_boot(bool(data.get("enabled", True)))
+            self._json({"ok": True, "enabled": enabled})
 
         elif p == "/api/store":
             subprocess.run(["alsactl", "store"], stderr=subprocess.DEVNULL)

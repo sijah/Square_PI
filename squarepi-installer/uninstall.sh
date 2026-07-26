@@ -337,6 +337,16 @@ done
 rm -f /usr/local/bin/squarepi-eq-server.py
 rm -f /usr/local/bin/squarepi-eq-init.sh
 rm -f /etc/squarepi-initialized
+
+# Resume-after-restart (installed unconditionally, so removed unconditionally).
+for svc in squarepi-resume squarepi-resume-mark; do
+  if systemctl is-enabled --quiet "${svc}" 2>/dev/null; then
+    systemctl disable "${svc}"
+  fi
+  rm -f "/etc/systemd/system/${svc}.service"
+done
+rm -f /usr/local/bin/squarepi-resume.sh /usr/local/bin/squarepi-resume-mark.sh
+rm -f /run/squarepi-resume /var/lib/squarepi/resume_on_boot
 rm -f /var/lib/mympd/scripts/EQ*.lua
 rm -f /var/lib/mympd/scripts/Power_Restart.lua /var/lib/mympd/scripts/Power_Shutdown.lua
 systemctl daemon-reload

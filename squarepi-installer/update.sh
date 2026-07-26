@@ -645,6 +645,126 @@ if [[ -f "${USB_UMOUNT_SH}" ]] && ! grep -q 'is-system-running' "${USB_UMOUNT_SH
   USB_FIXED=1
 fi
 
+# -----------------------------------------------------------------------------
+# Resume playback after a restart.
+#
+# NOTE: these two scripts and units are duplicated from install.sh rather than
+# fetched, because install.sh generates them with heredocs — they are not files
+# in the repo, so fetch_repo_file has nothing to pull. Any edit to them must be
+# made in BOTH places. Making them real repo files would remove this trap.
+# -----------------------------------------------------------------------------
+step "Installing resume-after-restart service"
+
+mkdir -p /var/lib/squarepi
+[[ -f /var/lib/squarepi/resume_on_boot ]] || echo "1" > /var/lib/squarepi/resume_on_boot
+
+cat > /usr/local/bin/squarepi-resume-mark.sh <<'EOF'
+#!/bin/bash
+# Runs BEFORE mpd.service. Records whether MPD was playing when the system last
+# went down, because MPD is about to overwrite that with "pause" (restore_paused).
+STATE_FILE="/var/lib/mpd/state"
+MARKER="/run/squarepi-resume"
+
+rm -f "${MARKER}"
+[[ -f "${STATE_FILE}" ]] || exit 0
+if grep -qE '^state: play$' "${STATE_FILE}"; then
+  touch "${MARKER}"
+fi
+exit 0
+EOF
+chmod +x /usr/local/bin/squarepi-resume-mark.sh
+
+cat > /usr/local/bin/squarepi-resume.sh <<'EOF'
+#!/bin/bash
+# Runs AFTER mpd.service. Presses play, but only once it is safe to.
+MARKER="/run/squarepi-resume"
+FLAG="/var/lib/squarepi/resume_on_boot"
+DEADLINE=$((SECONDS + 60))
+
+# Always clear the marker, whatever happens below: a resume that could not
+# complete this boot must not fire on the next one.
+cleanup() { rm -f "${MARKER}"; }
+trap cleanup EXIT
+
+[[ -f "${MARKER}" ]] || exit 0
+[[ "$(cat "${FLAG}" 2>/dev/null)" == "1" ]] || exit 0
+
+# Wait for MPD to answer. It is ordered before us, but "started" and "accepting
+# connections" are not the same instant.
+while ! mpc status >/dev/null 2>&1; do
+  (( SECONDS < DEADLINE )) || exit 0
+  sleep 2
+done
+
+# Nothing loaded means nothing to resume -- an empty queue, or a stop.
+[[ -n "$(mpc current 2>/dev/null)" ]] || exit 0
+
+# Do not start over the top of a phone. A device connected this early almost
+# certainly auto-reconnected and is the thing the user is listening to. This is a
+# heuristic -- connected is not the same as playing -- but erring towards "stay
+# quiet" is the right way to be wrong here: the queue is still loaded and paused,
+# and one press of play gets it back.
+if bluetoothctl devices Connected 2>/dev/null | grep -q .; then
+  exit 0
+fi
+
+# Wait for the file itself. This is the USB case: udev mounts the drive after
+# mpd starts, so the queue is restored before its files exist. A stream (http://)
+# has no local path and needs no wait.
+REL="$(mpc -f %file% current 2>/dev/null | head -n1)"
+case "${REL}" in
+  http://*|https://*|"") ;;
+  *)
+    while [[ ! -e "/var/lib/mpd/music/${REL}" ]]; do
+      (( SECONDS < DEADLINE )) || exit 0   # drive never showed up -- stay paused
+      sleep 2
+    done
+    ;;
+esac
+
+mpc play >/dev/null 2>&1 || true
+exit 0
+EOF
+chmod +x /usr/local/bin/squarepi-resume.sh
+
+cat > /etc/systemd/system/squarepi-resume-mark.service <<'EOF'
+[Unit]
+Description=SquarePi — record whether MPD was playing before this boot
+Before=mpd.service
+After=local-fs.target
+ConditionPathExists=/var/lib/mpd/state
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/squarepi-resume-mark.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/squarepi-resume.service <<'EOF'
+[Unit]
+Description=SquarePi — resume playback after a restart
+After=mpd.service squarepi-alsa-restore.service
+Wants=mpd.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=120
+ExecStart=/usr/local/bin/squarepi-resume.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable squarepi-resume-mark 2>/dev/null || true
+systemctl enable squarepi-resume 2>/dev/null || true
+success "Playback will resume after a restart (local library only)"
+APPLIED+=(
+  "Playback resumes after a restart: if the power goes out mid-song, the same track picks up where it left off on the next boot. Your own library only — Bluetooth, AirPlay and Spotify are controlled by the device that sent them. Toggle it in the EQ web UI under SYSTEM."
+)
+
 if [[ ${USB_FIXED} -eq 1 ]]; then
   systemctl daemon-reload
   success "USB queue-persistence fix applied"
