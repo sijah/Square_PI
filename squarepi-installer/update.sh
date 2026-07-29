@@ -58,7 +58,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
-TARGET_VER="1.6.7"  # <-- bump this every release (see guide above)
+TARGET_VER="1.6.8"  # <-- bump this every release (see guide above)
 CARD="LouderRaspberry"
 RELEASE_FILE="/etc/squarepi-release"
 EQ_SERVER_DEST="/usr/local/bin/squarepi-eq-server.py"
@@ -936,7 +936,42 @@ fi
 # --- end v1.6.7 gate ---
 
 # =============================================================================
-# ### END v1.6.7 DELTA
+# ### v1.6.8 DELTA — mobile web UI: POWER / UPDATE menus and the share form
+# ### (released 2026-07-26; brings any pre-1.6.8 install forward)
+# ###
+# ### Presentation only — a re-fetch of eq-server.py is the whole migration.
+# ### The mobile top bar used overflow-x:auto, and setting one overflow axis to
+# ### auto forces the other to compute to auto as well, so the bar became a
+# ### clipping box and both dropdowns (drawn below it) were cut off — Restart /
+# ### Shut down / Update were unreachable on a phone. Also: the share form's
+# ### label column left an IP address ~150px, and the card starts folded while
+# ### the nav that would find it is hidden on narrow screens.
+# =============================================================================
+if version_lt "${CURRENT_VER}" "1.6.8"; then
+
+if [[ -f "${EQ_SERVER_DEST}" ]] || unit_exists squarepi-eq.service; then
+  step "Updating EQ web server (mobile layout fixes)"
+  if fetch_repo_file "eq-server.py" "${EQ_SERVER_DEST}"; then
+    chmod +x "${EQ_SERVER_DEST}"
+    systemctl restart squarepi-eq 2>/dev/null || true
+    success "eq-server.py updated"
+    APPLIED+=(
+      "POWER (Restart / Shut down) and UPDATE menus now open on a phone — the top bar was clipping them off"
+      "NETWORK SHARE form is usable on a phone: labels above their fields, full-width entry boxes"
+      "NETWORK SHARE card starts open on a phone, where there is no side navigation to find it with"
+    )
+  else
+    warn "Could not fetch eq-server.py — mobile layout fixes not applied"
+  fi
+fi
+
+else
+  info "v1.6.8 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v1.6.8 gate ---
+
+# =============================================================================
+# ### END v1.6.8 DELTA
 # ###
 # ### >>> The next release's "### vX.Y.Z DELTA" block goes HERE, above this
 # ###     line. Do not add new steps below — steps 9-10 below must always run

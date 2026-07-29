@@ -4,6 +4,15 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.6.8] — 2026-07-26
+
+### Fixed
+- **The POWER menu couldn't be used on a phone.** Tapping POWER appeared to do nothing: the top bar was set to scroll sideways when it ran out of room, which had the side effect of cutting off anything drawn below it — including the Restart / Shut down menu, and the UPDATE menu alongside it. The bar now wraps onto a second line instead of scrolling, so both menus open normally. Restart and Shut down were unreachable from a phone before this.
+- **The NETWORK SHARE form was cramped on a phone.** Labels sat beside their fields as they do on a desktop, which left an IP address roughly 150 pixels to fit into. On narrow screens the labels now sit above their fields and each field uses the full width of the card.
+- **The NETWORK SHARE card was hard to find on a phone.** It starts folded away, and the side navigation that would lead you to it is hidden on narrow screens — so the only way in was spotting a collapsed heading well down the page. On a phone the card now starts open.
+
+---
+
 ## [1.6.7] — 2026-07-26
 
 ### Fixed

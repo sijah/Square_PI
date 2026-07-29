@@ -58,7 +58,7 @@ detach_usb_drives() {
 # Banner
 # -----------------------------------------------------------------------------
 echo -e "${BOLD}"
-INSTALLER_VER="1.6.7"
+INSTALLER_VER="1.6.8"
 
 echo "  ╔══════════════════════════════════════════════╗"
 echo "  ║         SquarePi Software Uninstaller        ║"

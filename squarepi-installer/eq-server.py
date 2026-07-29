@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-EQ_SERVER_VER = "1.6.7"
+EQ_SERVER_VER = "1.6.8"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
@@ -1326,12 +1326,26 @@ HTML = r"""<!DOCTYPE html>
     .columns { grid-template-columns:1fr; }
     .sidebar { display:none; }
 
-    /* Top bar: brand subtitle is the first thing to go; whatever still
-       doesn't fit scrolls horizontally instead of clipping off-screen
-       (buttons like POWER must stay reachable, not just visible-on-desktop). */
-    .topbar { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    /* Top bar: brand subtitle is the first thing to go; whatever still doesn't
+       fit wraps onto a second line.
+       NOT overflow-x:auto, which is what this used to do -- setting one axis to
+       auto forces the other to compute to auto as well, so the bar became a
+       clipping box and the POWER / UPDATE dropdowns (position:absolute, below
+       the bar) were cut off entirely on a phone. z-index can't rescue that:
+       clipping happens before stacking. Wrapping keeps the buttons reachable,
+       which is the point. */
+    .topbar { flex-wrap:wrap; padding:6px 14px; }
     .topbar-brand { width:auto; }
+    .topbar-center { flex-basis:100%; order:3; height:0; }
     .brand-sub { display:none; }
+    .topbar-actions { flex-wrap:wrap; }
+
+    /* Network share form: one column, labels above their fields. The desktop
+       `auto 1fr` sizes the label track to "PASSWORD" in letter-spaced caps,
+       which leaves an IP address about 150px to live in. */
+    .nas-form { grid-template-columns:1fr; gap:3px 0; }
+    .nas-form label { margin-top:5px; }
+    .nas-form input, .nas-form select { max-width:none; }
 
     /* 15-band EQ rack: don't let grid tracks fight the viewport down to
        illegible slivers. Give every band a fixed usable width and let the
@@ -1809,7 +1823,10 @@ function initCollapsed(){
   let collapsed = null;
   try { collapsed = JSON.parse(localStorage.getItem('squarepi-collapsed')); } catch(e){}
   if (!Array.isArray(collapsed)) {
-    collapsed = DEFAULT_COLLAPSED.slice();
+    // Folding a card away is only reasonable when there is a nav item to find
+    // it with. The sidebar is hidden below 680px, so on a phone a folded card
+    // is just a header buried down a long page -- start expanded instead.
+    collapsed = window.innerWidth <= 680 ? [] : DEFAULT_COLLAPSED.slice();
     try { localStorage.setItem('squarepi-collapsed', JSON.stringify(collapsed)); } catch(e){}
   }
   collapsed.forEach(id => {
