@@ -337,6 +337,31 @@ done
 rm -f /usr/local/bin/squarepi-eq-server.py
 rm -f /usr/local/bin/squarepi-eq-init.sh
 rm -f /etc/squarepi-initialized
+
+# Resume-after-restart (installed unconditionally, so removed unconditionally).
+for svc in squarepi-resume squarepi-resume-mark; do
+  if systemctl is-enabled --quiet "${svc}" 2>/dev/null; then
+    systemctl disable "${svc}"
+  fi
+  rm -f "/etc/systemd/system/${svc}.service"
+done
+rm -f /usr/local/bin/squarepi-resume.sh /usr/local/bin/squarepi-resume-mark.sh
+rm -f /run/squarepi-resume /var/lib/squarepi/resume_on_boot
+
+# Network share. The units are generated at runtime by the DSP UI, so their
+# names are derived the same way it derives them rather than hardcoded.
+NAS_MOUNT_POINT="/var/lib/mpd/music/nas"
+NAS_MOUNT_UNIT="$(systemd-escape --path --suffix=mount "${NAS_MOUNT_POINT}" 2>/dev/null || true)"
+NAS_AUTO_UNIT="$(systemd-escape --path --suffix=automount "${NAS_MOUNT_POINT}" 2>/dev/null || true)"
+for unit in "${NAS_AUTO_UNIT}" "${NAS_MOUNT_UNIT}"; do
+  [[ -n "${unit}" ]] || continue
+  systemctl disable --now "${unit}" 2>/dev/null || true
+  rm -f "/etc/systemd/system/${unit}"
+done
+umount -l "${NAS_MOUNT_POINT}" 2>/dev/null || true
+rmdir "${NAS_MOUNT_POINT}" 2>/dev/null || true
+rm -f /etc/squarepi-nas.cred /var/lib/squarepi/nas.json
+
 rm -f /var/lib/mympd/scripts/EQ*.lua
 rm -f /var/lib/mympd/scripts/Power_Restart.lua /var/lib/mympd/scripts/Power_Shutdown.lua
 systemctl daemon-reload

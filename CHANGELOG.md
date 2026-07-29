@@ -40,6 +40,70 @@ All notable changes to the SquarePi installer are documented here.
 - **The display's visual design was rebuilt around one accent colour and three type weights.** Colour previously encoded category — green for MPD, blue for Bluetooth, purple for EQ — which read as a debug tool rather than an audio product; source is now stated as a word and a single teal accent marks whatever is selected or live. Selected rows use a 2px accent edge on a panel instead of a full-width filled pill, level indicators use fine 1px tick scales instead of thick filled bars, and every screen carries the same status strip, so they read as one instrument. `fonts/` previously held only the bold face, meaning every glyph on the panel was bold; the regular and mono cuts of DejaVu are now bundled alongside it (same permissive license, `LICENSE_DEJAVU` included), with mono used for numerals so counting values don't jitter sideways as digits change.
 - **`display/` split into testable pieces.** Navigation lives in `nav.py` and system/network reads in `sysinfo.py`, both importable on a dev box; `screens.py` renderers are pure functions of their arguments with no I/O or module state, so all 9 screens plus the overlay can be rendered and checked headless. `demo_cycle_screens.py` now drives the real `nav.py` with fake data, which makes it a genuine test of navigation, timeouts and the overlay on hardware before MPD or Bluetooth are involved; its power confirmations are deliberately inert.
 - **`update.sh` can now refresh the display module.** Previously the updater could only replace single named files, so display code was unreachable to it. It now refreshes the module in place when the display is installed, and when it isn't, the "add it with `--with-display`" hint is no longer version-gated — it keeps appearing on later updates instead of scrolling past exactly once.
+## [1.6.8] — 2026-07-26
+
+### Fixed
+- **The POWER menu couldn't be used on a phone.** Tapping POWER appeared to do nothing: the top bar was set to scroll sideways when it ran out of room, which had the side effect of cutting off anything drawn below it — including the Restart / Shut down menu, and the UPDATE menu alongside it. The bar now wraps onto a second line instead of scrolling, so both menus open normally. Restart and Shut down were unreachable from a phone before this.
+- **The NETWORK SHARE form was cramped on a phone.** Labels sat beside their fields as they do on a desktop, which left an IP address roughly 150 pixels to fit into. On narrow screens the labels now sit above their fields and each field uses the full width of the card.
+- **The NETWORK SHARE card was hard to find on a phone.** It starts folded away, and the side navigation that would lead you to it is hidden on narrow screens — so the only way in was spotting a collapsed heading well down the page. On a phone the card now starts open.
+
+---
+
+## [1.6.7] — 2026-07-26
+
+### Fixed
+- **Adding a network share could stop the web UI (myMPD) from coming back after a reboot.** With a share configured, the speaker would sometimes boot with music playing but the myMPD control page refusing to load — and it came and went between reboots, which made it look like several different faults. The cause was the share's automount unit: it was told to wait for the network, but an automount has to be ready very early in boot, before the network exists. That contradiction made systemd quietly drop a core part of the startup sequence to resolve it, and myMPD depended on the part that got dropped. The automount no longer waits for the network — it doesn't need to, because it does nothing until something actually reads the folder, and only *then* does the real mount (which does wait for the network) happen. Reproduced and confirmed on hardware. If you already have a share configured, the SquarePi updater repairs the existing unit in place; the fix applies fully on the next reboot.
+- **A network share could empty the play queue on shutdown.** The share was being disconnected while MPD was still running, so MPD saw the folder vanish, treated those tracks as deleted, and saved an emptied queue — the same fault USB drives had before 1.6.4, now closed for network shares too by stopping MPD first.
+- **The NETWORK SHARE card showed "Connected" when nothing was actually mounted.** The status check treated the always-present automount point as a live mount, so the indicator went green as soon as a share was saved, even after a reboot before the share had been touched or while the NAS was switched off. It now reports connected only when a real share is mounted.
+
+### Known limitation
+- With the NAS powered **off**, its tracks stay listed in the library across a reboot — MPD keeps them from its cache and doesn't re-scan the missing folder (confirmed on hardware) — they simply can't play until the NAS is back on. They only drop out of the library if a rescan (`mpc update`) runs while the share is unreachable; `mpc update nas` restores them once it is back. A share that disappears *while the speaker is running* is the harder case — MPD's live folder-watch notices and purges it — and is tracked separately.
+
+---
+
+## [1.6.6] — 2026-07-26
+
+### Fixed
+### Added
+- **A dedicated network share guide**, [docs/network-share.md](docs/network-share.md). Setup instructions per server type (Synology/QNAP, Windows, macOS, Samba on another Pi), a troubleshooting table covering every error the card can report, what to check when a share mounts but myMPD stays empty, stutter causes, the files and units involved, and security guidance. The share content that was scattered across three documents now has one place to point people at.
+
+### Fixed
+- **Network share fields were pushed to the far right of the card.** The width cap that stops an IP address sitting in a box wide enough for a sentence was applied to the form's label column rather than to the fields themselves. A CSS grid column sized `auto` absorbs whatever space is left over, so the labels stretched and carried every input across to the right edge, far from the label describing it. The cap now sits on the fields.
+
+---
+
+## [1.6.5] — 2026-07-26
+
+### Added
+- **Play music from a network share, set up in the web UI.** A **NETWORK SHARE** card in the DSP interface connects the speaker to a NAS or a shared folder on a computer — SMB/Windows shares and NFS. Fill in the server's IP address, the folder name and (for SMB) a username and password, and it appears in myMPD as `nas` alongside the built-in library. Previously this meant an SSH session, installing `cifs-utils` by hand and writing an `/etc/fstab` line, where a single mistake either produced an empty folder with no explanation or stopped the Pi from booting.
+
+  **Test connection** mounts the share, reports what it found, and unmounts again, so a wrong password says so instead of leaving a folder that silently stays empty. Nothing is saved until a connection has actually succeeded. The two mistakes that made hand-written entries fail are handled rather than documented: MPD's own user and group are looked up and applied as the mount's ownership — SMB has no real Unix ownership, so those options *are* the ownership, and getting them wrong is what produces a share that `pi` can read and MPD cannot — and `.local` server names are rejected with an explanation, because they cannot be resolved at the point the share is mounted after a restart.
+
+  The share is mounted only when something reads it, so a NAS that is asleep, switched off or simply slow never delays startup — and once mounted it stays mounted, which matters more than it sounds: an unmounted automount path reads as an empty folder, and MPD treats an empty folder as files that have been deleted. `cifs-utils` and `nfs-common` are now installed as standard.
+
+  If the NAS does go away while the speaker is on, those tracks disappear from myMPD and from the play queue, because MPD can no longer see them. Running `mpc update nas` once the NAS is back restores everything. This is the same behaviour as pulling a USB drive mid-play, and it is the price of MPD picking up new files by itself.
+
+  `/etc/fstab` is deliberately left untouched; SquarePi writes its own systemd mount unit, which `uninstall.sh` removes cleanly. A hand-written fstab entry, if you already have one, keeps working and is not interfered with. SMB passwords are stored on the Pi in a root-only credentials file — unavoidable for an unattended mount, and the same thing an fstab setup does — and are never sent back to the browser.
+
+---
+
+## [1.6.4] — 2026-07-26
+
+### Added
+- **Playback resumes after a restart.** If the power goes out mid-song, the same track picks up where it left off on the next boot — same position, same volume, same queue. Applies to your own music library only; Bluetooth, AirPlay and Spotify are controlled by the device that sent them, so there is nothing on this end to resume. On by default, with a toggle in the EQ web UI under **SYSTEM → Startup**.
+
+  Two small services do the work. The first runs before MPD and records whether MPD was playing when the box last went down — it has to read that before MPD overwrites it, and reading the saved state rather than writing a marker at shutdown is what makes this survive a pulled plug, which is the case that matters. The second runs after MPD and waits for playback to actually be safe: MPD answering, the track's file present (USB drives are mounted after MPD starts), and no phone already connected over Bluetooth. If any of that never comes good within a minute it gives up quietly and leaves the queue paused, rather than playing the wrong thing.
+
+### Fixed
+- **The EQ web UI took seconds to appear on first load.** The page's opening request, `/api/state`, read every amp control one at a time — 15 EQ bands, analog gain, both channel gains, two enums, four matrix cells and 13 fault flags, each its own `amixer` process, all back to back. Thirty-seven process spawns before the page could paint, which on a Pi Zero 2W is most of the wait. It's now a single `amixer contents` call, parsed once. The `/api/faults` poller got the same treatment (13 spawns → 1). Nothing else changed: if the batched read comes back empty, every control falls through to its old individual read, so the page fills in correctly either way. This only ever affected first paint — once loaded, the page's pollers were always cheap, which is why it felt fast afterwards.
+- **The EQ web server handled one request at a time.** The page fires three requests the moment it loads, and they queued behind whichever was slowest. It's now a `ThreadingHTTPServer`.
+- **Saving a custom EQ preset could be seen half-written.** The preset file was truncated and rewritten in place, so anything reading it at that instant got an empty or partial document — and the local display, which reads the same file and fails soft, would show no custom presets at all. Writes now go to a temp file and are renamed into place, which is atomic.
+- **The play queue never survived a reboot when your music was on a USB drive.** systemd stops units in reverse start order, so the USB mount unit — ordered `After=mpd.service` — was torn down while MPD was still running. MPD's `auto_update` inotify watch saw the drive disappear, purged every song on it from the database, and pruning those songs from the play queue left only whatever was playing. MPD then wrote that emptied queue to its state file. Four coordinated changes fix it: the mount unit is now ordered `Before=mpd.service` so MPD is stopped first; the unmount helper skips its database refresh while the system is shutting down; the mount helper only refreshes when MPD is actually running (at boot it now runs while MPD is still down, and blocking on a daemon that isn't listening delayed boot by minutes); and MPD flushes its state every 30s rather than the 120s default, so a power cut loses less.
+- **Adding one feature to an existing install disabled the others.** The optional-feature flags started from zero on every run, so re-running the installer with `--with-spotify` on a box that already had DLNA wrote `DLNA_ENABLED=0` to `/etc/squarepi-release`. Nothing was actually uninstalled — upmpdcli kept running — but that file is what the DSP web UI reads to decide which panels to show, so the feature vanished from the interface. The installer now reads what's already recorded and merges: features already installed stay installed, and it prints which ones it kept. Flags are additive; `uninstall.sh` is still the way to remove something.
+- **Typo'd installer flags were silently ignored.** `--with spotify` (two words) or `--with_spotify` used to sail straight through: the install succeeded, said nothing, and simply lacked the feature that was asked for. Unrecognised arguments are now a hard error that lists the valid flags. `--with-bt` and `--with-eq` remain accepted no-ops.
+
+### Changed
+- **MPD restores paused instead of playing.** USB drives are mounted by udev *after* `mpd.service` starts, so a restored queue of USB tracks would otherwise have MPD erroring through files that aren't there yet. The queue now comes back intact and waiting. This is what makes resume-after-restart safe: rather than MPD starting the moment it loads, playback is started deliberately, a few seconds later, once the files are actually reachable. With resume switched off, the queue simply waits for you to press play.
 
 ---
 

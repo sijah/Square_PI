@@ -106,6 +106,23 @@ Every install includes **Bluetooth and the visual DSP interface** alongside MPD,
 
 If a BlueALSA package isn't available on your OS image, the installer warns and continues — the core install never aborts.
 
+An unrecognised flag stops the installer with a list of the valid ones, rather than
+running to completion without the feature you asked for.
+
+### Adding a feature later
+
+Decided you want Spotify after all? Re-run the installer with the flag for the new
+feature. It takes a few minutes, but nothing is lost — your music, playlists, EQ
+settings and paired Bluetooth devices all stay put.
+
+```bash
+cd ~/Square_PI/squarepi-installer && sudo bash install.sh --with-spotify
+```
+
+You only need the flag for what you're **adding**. Anything already installed is
+detected and kept, and the installer prints what it kept so you can see it
+happened. To remove a feature, use `uninstall.sh`.
+
 ### Clone and run locally (alternative)
 
 ```bash
@@ -127,7 +144,7 @@ sudo bash install.sh
 9. Sets MPD volume to 25% (safe first-boot default)
 10. Installs a first-boot EQ init service (sets all 15 bands to 0 dB and Analog Gain to −10 dB, runs once)
 11. Installs Bluetooth and the EQ server by default; DLNA, Spotify, AirPlay when requested
-12. Sets up USB auto-mount (udev + systemd) so drives mount on insert
+12. Sets up USB auto-mount (udev + systemd) so drives mount on insert, and installs the SMB/NFS helpers used by network shares
 13. Verifies myMPD responds on port 8080
 14. Writes install metadata to `/etc/squarepi-release`
 
@@ -216,6 +233,32 @@ mpc update
 ```
 
 Prefer to pin a specific drive manually (by UUID) instead? See **USB Drive → Advanced** in [supported-protocols.md](supported-protocols.md) for the correct per-filesystem fstab lines.
+
+**Play from a NAS or a shared folder:**
+
+Open the DSP interface at `http://squarepi.local:8081`, expand **NETWORK SHARE**, and fill in three things:
+
+| Field | What to put | Example |
+|---|---|---|
+| Type | `SMB / Windows share` for a NAS or a Windows/Mac shared folder; `NFS` if your NAS offers it | SMB |
+| Server | The **IP address** of the machine holding the music | `192.168.1.50` |
+| Folder | The share name, as the NAS advertises it | `Music` |
+
+For SMB, add the username and password the NAS expects; leave both empty if the share is open to everyone. NFS needs neither.
+
+Press **Test connection** first — it tries the share and tells you what happened, including how many items it could see. Then **Connect & save**. The share appears in myMPD as `nas` within a few seconds.
+
+Setting one up on a Synology, Windows, macOS or Samba box, or hitting an error? See the dedicated guide: **[network-share.md](network-share.md)**.
+
+Use the **IP address, not a `.local` name**. Names can't be looked up early enough when the Pi reconnects to the share on its own after a restart, so the form rejects them. If you don't know the IP, your router's device list will show it.
+
+A few things worth knowing:
+
+- The share is mounted only when something reads it, so a NAS that's asleep or switched off never holds up startup — it simply reconnects next time it's needed.
+- Large libraries take a while to scan the first time. Playback works as tracks appear.
+- **Remove** unmounts the share and forgets the settings. Nothing on the NAS is touched.
+- Your own `/etc/fstab` entries are left alone. SquarePi writes its own mount unit, so a manual setup you already have keeps working.
+- The SMB password is stored on the Pi in a root-only file, which is what any unattended mount requires. Anyone on your network can reach the DSP interface, so give the speaker an account with read-only access to the music rather than an administrator one.
 
 ---
 
@@ -421,6 +464,39 @@ grep -A5 vu_meter /etc/mpd.conf
 
 ---
 
+## Resume after a restart
+
+If the power goes out while music is playing, SquarePi picks the same track back
+up on the next boot — same position in the song, same volume, same queue. This is
+on by default.
+
+It applies to your own music library only. Bluetooth, AirPlay and Spotify are
+controlled by the phone or laptop that sent the audio, so there is nothing on the
+SquarePi end to resume — start those from the sending device as usual.
+
+Playback resumes only if music was actually playing when the box went down. If you
+paused it, or stopped it, or the queue was empty, it stays quiet and waits for you.
+
+To turn it off, open the DSP UI and use **SYSTEM → Startup → Resume playback after
+restart**. Over SSH:
+
+```bash
+echo 0 | sudo tee /var/lib/squarepi/resume_on_boot
+```
+
+A few things worth knowing:
+
+- **Music on a USB drive still works.** The drive is mounted a moment after MPD
+  starts, so resume waits for the file to actually be there before playing.
+- **If the drive is missing**, nothing plays. The queue is still loaded and paused
+  — plug the drive back in and press play.
+- **If a phone is already connected over Bluetooth** when the Pi boots, resume
+  stands down so it doesn't start on top of whatever you're about to play.
+- **It gives up after about a minute.** If MPD or the drive never turn up in that
+  window, the queue stays paused rather than playing something unexpected.
+
+---
+
 ## Optional: Custom hostname and branding
 
 ```bash
@@ -568,6 +644,30 @@ Common causes:
 - **Library not scanned** — run `mpc update`.
 - Whole-disk-formatted drives mount from `/dev/sda` (no partition); the service handles this automatically.
 
+### Network share not working
+
+Start with **Test connection** in the DSP interface — it reports the actual reason rather than leaving you guessing. If you need to look deeper:
+
+```bash
+findmnt /var/lib/mpd/music/nas            # is it mounted?
+systemctl status var-lib-mpd-music-nas.mount
+sudo -u mpd ls /var/lib/mpd/music/nas     # can MPD read it?
+```
+
+Common causes:
+- **"The NAS rejected that username or password"** — some NAS boxes need the domain or workgroup prefixed, as `WORKGROUP\username`.
+- **"No share by that name"** — use the share name as the NAS advertises it, not the folder path on the NAS's own disks. `Music`, not `/volume1/Music`, for SMB.
+- **Mounted, but MPD sees nothing** — as with USB, run `sudo mount --make-shared /var/lib/mpd/music/nas` or restart MPD.
+- **Nothing appears in myMPD** — the first scan of a large library takes time; `mpc update nas` restarts it.
+- **The share came back but the music is gone from myMPD** — expected, and fixable in one command. While the NAS is unreachable MPD can't see those files, so it removes them from its database, which also clears them from the play queue. Once the NAS is back:
+
+  ```bash
+  mpc update nas
+  ```
+
+  Everything returns. Large libraries take a while to re-scan. This is the same behaviour as unplugging a USB drive mid-play, and it's the cost of MPD noticing new files automatically.
+- **Very old NAS** — SquarePi asks for SMB 3.0. Devices that only speak SMB 1 won't connect, and shouldn't be exposed to your network anyway.
+
 ---
 
 ## Uninstall
@@ -591,6 +691,9 @@ Prompts before removing MPD music data and before rebooting. Music files are not
 | `squarepi-eq` | EQ web server | `systemctl status squarepi-eq` |
 | `squarepi-alsa-restore` | Restores EQ state on boot | `systemctl status squarepi-alsa-restore` |
 | `squarepi-eq-init` | First-boot EQ flat init | `systemctl status squarepi-eq-init` |
+| `squarepi-resume-mark` | Records pre-boot playback state | `systemctl status squarepi-resume-mark` |
+| `squarepi-resume` | Resumes playback after a restart | `systemctl status squarepi-resume` |
+| `var-lib-mpd-music-nas.automount` | Mounts the network share on first access | `systemctl status var-lib-mpd-music-nas.automount` |
 | `bluetooth` | Bluetooth stack | `systemctl status bluetooth` |
 | `bluealsa` | BT audio routing | `systemctl status bluealsa` |
 | `squarepi-bt-agent` | Auto-pair agent | `systemctl status squarepi-bt-agent` |

@@ -23,7 +23,7 @@ One install command sets up the audio driver, music player, web UI, Bluetooth, D
 | Output | **2×30W** stereo Class-D |
 | Audio quality | **48kHz / 24-bit** — automatic upscaling on all sources |
 | Cost | **Under $30** in parts |
-| Protocols | **7** — BT · DLNA · Spotify · AirPlay · USB · Radio · MPD |
+| Protocols | **8** — BT · DLNA · Spotify · AirPlay · USB · NAS · Radio · MPD |
 | Setup | **One command** — `sudo bash install.sh` (Bluetooth + EQ UI included) |
 | Control | **Browser UI** — `squarepi.local`, no app install · optional on-device display |
 | Cloud | **None** — fully local, no account, no subscription |
@@ -39,10 +39,11 @@ One install command sets up the audio driver, music player, web UI, Bluetooth, D
 | **Spotify Connect** | SquarePi appears as a speaker in the Spotify app (Premium required) |
 | **AirPlay** | Stream from iPhone, iPad, Mac — no Apple account needed |
 | **USB Drive** | Plug in a drive — library auto-scans, no steps required |
+| **Network Share** | Play from a NAS or a shared folder over SMB or NFS, set up in the browser |
 | **Internet Radio** | Built-in streaming, hundreds of stations, no extra app |
 | **MPD clients** | Any MPD-compatible app on any OS auto-discovers SquarePi |
 
-Bluetooth, DLNA, USB, Radio, and MPD clients all share the output via ALSA dmix and can play at the same time. Spotify Connect and AirPlay are the exception — starting either one pauses MPD (so it won't fight with USB/Radio/DLNA playback), though it still layers fine with Bluetooth.
+Bluetooth, DLNA, USB, network shares, Radio, and MPD clients all share the output via ALSA dmix and can play at the same time. Spotify Connect and AirPlay are the exception — starting either one pauses MPD (so it won't fight with USB/Radio/DLNA playback), though it still layers fine with Bluetooth.
 
 ---
 
@@ -112,6 +113,8 @@ Open `http://squarepi.local:8081` for the full real-time DSP control panel.
 - **Mixer Mode** — `Stereo` / `Mono` / `Left` / `Right` (crossfeed matrix via separate L2L / R2L / L2R / R2R gain controls)
 - **Save to chip** — settings survive power cycles (`alsactl store`)
 - **Power menu** — Restart / Shut down the Pi from the UI (mutes the amp first, then halts); the same two actions are also available as one-tap tiles in myMPD under Scripts
+- **Resume after restart** — if the power goes out mid-song, the same track picks up where it left off on the next boot; on by default, switch it off under SYSTEM → Startup (applies to your own library, not Bluetooth or AirPlay)
+- **Network share** — connect a NAS or a shared folder on your computer (SMB or NFS) and play from it directly; test the connection before saving, and it appears in myMPD as `nas`
 
 Plus a few quality-of-life touches:
 
@@ -402,6 +405,7 @@ Hardware designed in **KiCad**.
 | `mympd` | Mobile-friendly web UI |
 | `avahi-daemon` | mDNS — `squarepi.local` on any network |
 | `exfatprogs` | exFAT USB drive support |
+| `cifs-utils`, `nfs-common` | Network share (SMB / NFS) support |
 | EQ preset Lua scripts | 13 one-tap presets in myMPD Scripts |
 | Sleep timer Lua scripts | 30 / 60 / 90 min + Cancel in myMPD Scripts |
 | `squarepi-eq-init.service` | Sets EQ flat on first boot, then disables itself |
@@ -487,6 +491,8 @@ mpc update
 Internet radio: add streams in myMPD → **Browse > Webradio**.
 
 **USB drive: just plug it in.** SquarePi auto-mounts it and it appears in MPD under `usb` — no SSH, no fstab. FAT32, exFAT, NTFS, and ext4 drives all work, any label or size. Unplug to remove it. (Manual/advanced mounting is still documented in [docs/setup.md](docs/setup.md).)
+
+**Network share: set it up in the browser.** DSP interface → **NETWORK SHARE**. Enter the server's IP address, the folder name, and for SMB a username and password; **Test connection** checks it before anything is saved. The share appears in MPD under `nas`. Use the IP rather than a `.local` name — those can't be resolved when the share is remounted after a restart. Per-server instructions, troubleshooting, and security notes in [docs/network-share.md](docs/network-share.md).
 
 ---
 
@@ -639,7 +645,8 @@ Removes all SquarePi components. Prompts before deleting music data. Music files
 | Document | Contents |
 |---|---|
 | [docs/audio-engine.md](docs/audio-engine.md) | How the audio pipeline works — upscaling, resampling, mixing, DSP EQ |
-| [docs/supported-protocols.md](docs/supported-protocols.md) | Setup and usage for all 7 protocols |
+| [docs/supported-protocols.md](docs/supported-protocols.md) | Setup and usage for all 8 protocols |
+| [docs/network-share.md](docs/network-share.md) | NAS / shared folder guide — setup per server type, troubleshooting, security |
 | [docs/setup.md](docs/setup.md) | Full guide: OS flash → HAT → install → first boot → troubleshoot |
 | [ABOUT.md](ABOUT.md) | Full project pitch for press and feature requests |
 

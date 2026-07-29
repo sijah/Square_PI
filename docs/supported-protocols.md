@@ -1,6 +1,6 @@
 # SquarePi — Supported Protocols
 
-SquarePi accepts audio from seven sources. All are upscaled, resampled, and equalized automatically. Multiple protocols can be active at the same time — ALSA dmix mixes them in software so nothing pauses anything else.
+SquarePi accepts audio from eight sources. All are upscaled, resampled, and equalized automatically. Multiple protocols can be active at the same time — ALSA dmix mixes them in software so nothing pauses anything else.
 
 ---
 
@@ -160,6 +160,30 @@ sudo systemctl daemon-reload && sudo mount -a
 sudo sed -i 's|^music_directory.*|music_directory "/mnt/usb-music"|' /etc/mpd.conf
 sudo systemctl restart mpd && mpc update
 ```
+
+---
+
+## Network Share (NAS)
+
+**Set it up in the browser.** DSP interface → **NETWORK SHARE**: pick SMB or NFS, enter the server's IP address, the folder name, and (for SMB) a username and password. It appears in MPD under `nas`, alongside your built-in library.
+
+- **SMB/CIFS** for a NAS, or a shared folder on Windows or macOS. **NFS** if your NAS offers it — simpler, no credentials.
+- **Test connection** mounts the share, reports how many items it can see, and unmounts again. Nothing is saved until a connection has succeeded.
+- MPD's own user and group are applied as the mount's ownership. SMB carries no Unix ownership of its own, so these options *are* the ownership — this is what usually goes wrong in a hand-written mount, where the share reads fine as `pi` and appears empty to MPD.
+- Use the **IP address, not a `.local` name**. mDNS can't be resolved at the point the share is mounted after a restart, so names are rejected with an explanation.
+- `cifs-utils` and `nfs-common` are installed automatically.
+
+**How it works:** the DSP server writes a systemd `.mount` + `.automount` pair for `/var/lib/mpd/music/nas`, then runs `mpc update nas`. `/etc/fstab` is deliberately left alone — a bad line there can hang boot, and it's a file you may keep your own entries in. Any manual fstab mount you already have keeps working and is not interfered with.
+
+The share mounts on first access rather than at boot, so a NAS that's asleep, switched off, or slow never delays startup. Once mounted it stays mounted: an unmounted automount path reads as an *empty* folder, and MPD treats an empty folder as files that have been deleted.
+
+**If the NAS goes away** while the speaker is on, those tracks leave both the database and the play queue, because MPD can no longer see them. Run `mpc update nas` once it's back and everything returns. This is the same behaviour as unplugging a USB drive mid-play, and it's the cost of MPD picking up new files by itself.
+
+SMB passwords are stored on the Pi in a root-only credentials file, which is what any unattended mount requires, and are never sent back to the browser. Anyone on your network can reach the DSP interface, so give the speaker a read-only account rather than an administrator one.
+
+**Remove** unmounts the share, deletes the units and credentials, and forgets the settings. Nothing on the NAS is touched.
+
+Per-server setup instructions (Synology, Windows, macOS, Samba), a full troubleshooting table, and security notes: **[network-share.md](network-share.md)**.
 
 ---
 

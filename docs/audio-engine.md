@@ -209,7 +209,7 @@ amixer -c LouderRaspberry cset "name=BT Volume" 50
 
 ### Multiple simultaneous sources
 
-The dmix layer supports many simultaneous writers, and Bluetooth, MPD (which also carries USB, Internet Radio, and DLNA — DLNA bridges to MPD, it isn't a separate audio path), can all produce audio at the same time without interrupting each other. Spotify Connect and AirPlay are the exception: `squarepi-spotify-event.sh` and `squarepi-airplay-event.sh` each run `mpc pause` when a session starts, so starting Spotify or AirPlay pauses whatever MPD was playing (they still play alongside Bluetooth, which nothing pauses).
+The dmix layer supports many simultaneous writers, and Bluetooth, MPD (which also carries USB, network shares, Internet Radio, and DLNA — DLNA bridges to MPD, it isn't a separate audio path), can all produce audio at the same time without interrupting each other. Spotify Connect and AirPlay are the exception: `squarepi-spotify-event.sh` and `squarepi-airplay-event.sh` each run `mpc pause` when a session starts, so starting Spotify or AirPlay pauses whatever MPD was playing (they still play alongside Bluetooth, which nothing pauses).
 
 ---
 

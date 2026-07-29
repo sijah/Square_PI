@@ -15,13 +15,16 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-EQ_SERVER_VER = "1.6.3"
+EQ_SERVER_VER = "1.6.8"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
 BT_VOL_FILE = "/var/lib/squarepi/bt_volume"
+# "1" = press play again after a restart, if MPD was playing when the box went
+# down. squarepi-resume.service reads this; the SYSTEM card toggles it.
+RESUME_FLAG_FILE = "/var/lib/squarepi/resume_on_boot"
 
 RELEASE_FILE = "/etc/squarepi-release"
 # Releases aren't published as GitHub Releases (releases/latest returns a stale
@@ -99,13 +102,34 @@ def load_custom_presets():
         return {}
 
 def save_custom_presets(data):
+    """Write the preset file atomically.
+
+    Opening the real path "w" truncates it, so a reader that opened the file at
+    the wrong moment saw an empty or half-written document. The local display
+    reads this file too, and it fails soft to "no custom presets" — which looks
+    exactly like the presets having been lost. Write a sibling temp file and
+    rename it instead: os.replace is atomic, so a reader sees either the old
+    file or the new one.
+
+    Callers must hold _PRESETS_LOCK.
+    """
+    tmp = CUSTOM_PRESETS_FILE + ".tmp"
     try:
-        with open(CUSTOM_PRESETS_FILE, "w") as f:
+        with open(tmp, "w") as f:
             json.dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, CUSTOM_PRESETS_FILE)
     except Exception:
-        pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 CUSTOM_PRESETS = load_custom_presets()
+# Guards CUSTOM_PRESETS and the file behind it. The server is threaded, so two
+# saves (or a save and a read) can otherwise overlap mid-mutation.
+_PRESETS_LOCK = threading.Lock()
 
 
 # ── amixer helpers ─────────────────────────────────────────────────────────────
@@ -180,12 +204,125 @@ def amixer_get_enum(control):
     return ""
 
 
+def amixer_contents():
+    """Read every control on the card in ONE amixer call.
+
+    Reading controls one at a time costs a fork+exec+ALSA-open each. A full page
+    load needs 37 of them (15 EQ bands, analog gain, 2 channel gains, 2 enums,
+    4 matrix cells, 13 fault flags) and they run back to back, which is what made
+    the DSP page slow to first paint on a Pi Zero 2W. `amixer contents` dumps the
+    lot in one go.
+
+    Returns {control name: {"values": [int, ...], "items": [str, ...]}}, or {} if
+    the call fails — every caller falls back to its own per-control read, so a
+    parse that comes up empty is slow, never wrong.
+
+    Parsed shape:
+        numid=6,iface=MIXER,name='Analog Gain'
+          ; type=INTEGER,access=rw---R--,values=1,min=0,max=31,step=0
+          : values=11
+        numid=9,iface=MIXER,name='Mixer Mode'
+          ; type=ENUMERATED,access=rw------,values=1,items=4
+          ; Item #0 'Stereo'
+          : values=0
+    For ENUMERATED controls ": values=N" is an index into "items", not the value.
+    """
+    out = _run(["amixer", "-c", CARD, "contents"])
+    if not out:
+        return {}
+    snap = {}
+    current = None
+    for line in out.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("numid=") and "name=" in stripped:
+            name = stripped.split("name=", 1)[1].strip()
+            # Trailing fields after the quoted name are possible; take the quoted run.
+            if name.startswith("'"):
+                name = name[1:].split("'", 1)[0]
+            elif name.startswith('"'):
+                name = name[1:].split('"', 1)[0]
+            current = {"values": [], "items": []}
+            snap[name] = current
+            continue
+        if current is None:
+            continue
+        if stripped.startswith("; Item #"):
+            part = stripped.split("#", 1)[1]
+            if "'" in part:
+                current["items"].append(part.split("'")[1])
+        elif stripped.startswith(": values="):
+            for tok in stripped.split("=", 1)[1].split(","):
+                try:
+                    current["values"].append(int(tok))
+                except ValueError:
+                    pass
+    return snap
+
+
+def snap_int(snap, control, default=None):
+    """Integer value for a control from an amixer_contents() snapshot.
+
+    Falls back to a single-control read when the control is absent from the
+    snapshot (or there is no snapshot), so callers never have to branch.
+    """
+    entry = snap.get(control) if snap else None
+    if entry and entry["values"]:
+        return entry["values"][0]
+    return amixer_get_int(control) if default is None else default
+
+
+def snap_enum(snap, control):
+    """Enum string for a control from a snapshot, or a single-control read."""
+    entry = snap.get(control) if snap else None
+    if entry and entry["values"] and entry["items"]:
+        idx = entry["values"][0]
+        if 0 <= idx < len(entry["items"]):
+            return entry["items"][idx]
+    return amixer_get_enum(control)
+
+
 def amixer_set_enum(control, value):
     """Set an enum control by string value."""
     subprocess.run(
         ["amixer", "-c", CARD, "sset", control, value],
         stderr=subprocess.DEVNULL
     )
+
+
+def get_resume_on_boot():
+    """True if playback should resume after a restart. Defaults to on.
+
+    A missing file means an install that predates the feature, or one where
+    /var/lib/squarepi was cleared — both should behave like a fresh install,
+    which has it enabled.
+    """
+    try:
+        with open(RESUME_FLAG_FILE) as f:
+            return f.read().strip() == "1"
+    except FileNotFoundError:
+        return True
+    except Exception:
+        # Unreadable for any other reason: treat it as on, matching a fresh
+        # install, rather than silently disabling a feature the user enabled.
+        return True
+
+
+def set_resume_on_boot(enabled):
+    """Persist the resume-on-restart flag. Returns what was actually stored."""
+    try:
+        os.makedirs(os.path.dirname(RESUME_FLAG_FILE), exist_ok=True)
+        tmp = RESUME_FLAG_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            f.write("1" if enabled else "0")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, RESUME_FLAG_FILE)
+    except Exception:
+        # Never let a failed write take the endpoint down with it. The caller
+        # re-reads and reports what is actually stored, so the UI snaps back to
+        # the truth instead of showing a change that did not happen.
+        pass
+    return get_resume_on_boot()
 
 
 def power_off_or_reboot(action):
@@ -207,13 +344,412 @@ def power_off_or_reboot(action):
     threading.Thread(target=_halt, daemon=True).start()
 
 
-def get_faults():
-    """Read all fault/warning booleans. Returns dict key→int (0 or 1)."""
-    result = {}
-    for key, ctrl, _ in FAULT_CONTROLS:
-        raw = amixer_get_int(ctrl)
-        result[key] = raw
-    return result
+def get_faults(snap=None):
+    """Read all fault/warning booleans. Returns dict key→int (0 or 1).
+
+    Pass an amixer_contents() snapshot to read all 13 without spawning 13
+    processes; omit it and each is read individually as before.
+    """
+    return {key: snap_int(snap, ctrl) for key, ctrl, _ in FAULT_CONTROLS}
+
+
+# ── Network share (NAS) ────────────────────────────────────────────────────────
+# Mounts an SMB or NFS share INSIDE the music directory, which is the same trick
+# USB auto-mount uses: MPD picks it up as a subfolder with no mpd.conf change.
+#
+# Deliberately inflexible. The mount point, the filesystem list and the mount
+# options are all fixed here — nothing the browser sends reaches a shell, and
+# every subprocess call is an argument list. The form supplies a host, a share
+# path and credentials, and nothing else.
+#
+# /etc/fstab is left alone on purpose: a bad line there can hang boot, and it is
+# a file users keep their own entries in. A generated .mount + .automount pair
+# is the same thing systemd would synthesise from an x-systemd.automount fstab
+# entry, in a file uninstall.sh can delete cleanly.
+
+NAS_MOUNT_POINT = "/var/lib/mpd/music/nas"
+NAS_CONF_FILE = "/var/lib/squarepi/nas.json"
+NAS_CRED_FILE = "/etc/squarepi-nas.cred"
+NAS_TYPES = ("cifs", "nfs")
+
+# Host: IPv4 or a DNS label run. Deliberately no ".local" advice here — mDNS is
+# not resolvable at mount time, which is the single most common way a hand-
+# written fstab entry fails at boot.
+_NAS_HOST_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
+_NAS_SHARE_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ._-/")
+_NAS_USER_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ._@-")
+
+_NAS_LOCK = threading.Lock()
+
+
+def _nas_clean(value, allowed, maxlen):
+    value = str(value or "").strip()
+    if len(value) > maxlen:
+        return None
+    return value if all(c in allowed for c in value) else None
+
+
+def nas_validate(cfg):
+    """Return (clean_cfg, None) or (None, 'why it was rejected')."""
+    fstype = str(cfg.get("type", "cifs")).strip().lower()
+    if fstype not in NAS_TYPES:
+        return None, "Share type must be SMB or NFS."
+
+    host = _nas_clean(cfg.get("host"), _NAS_HOST_OK, 253)
+    if not host:
+        return None, "Server address is empty or has characters that aren't allowed."
+    if host.endswith(".local"):
+        return None, (".local names can't be resolved when the share is mounted at boot. "
+                      "Use the NAS's IP address instead.")
+
+    share = _nas_clean(cfg.get("share"), _NAS_SHARE_OK, 255)
+    if not share:
+        return None, "Share path is empty or has characters that aren't allowed."
+    share = "/" + share.strip("/")
+    if ".." in share:
+        return None, "Share path can't contain '..'."
+
+    user = _nas_clean(cfg.get("user"), _NAS_USER_OK, 128)
+    if user is None:
+        return None, "Username has characters that aren't allowed."
+
+    password = str(cfg.get("password") or "")
+    if len(password) > 256 or "\n" in password or "\r" in password:
+        return None, "Password is too long or contains a line break."
+
+    return {"type": fstype, "host": host, "share": share,
+            "user": user, "password": password}, None
+
+
+def nas_source(cfg):
+    """The 'what' half of the mount — //host/share for SMB, host:/share for NFS."""
+    if cfg["type"] == "cifs":
+        return "//" + cfg["host"] + cfg["share"]
+    return cfg["host"] + ":" + cfg["share"]
+
+
+def _nas_mpd_ids():
+    """MPD's uid/gid. SMB has no real Unix ownership, so these mount options ARE
+    the ownership — get them wrong and the share mounts but MPD sees nothing."""
+    uid = gid = None
+    try:
+        import pwd
+        uid = pwd.getpwnam("mpd").pw_uid
+    except Exception:
+        pass
+    try:
+        import grp
+        gid = grp.getgrnam("audio").gr_gid
+    except Exception:
+        pass
+    return uid, gid
+
+
+def nas_mount_options(cfg, cred_file=NAS_CRED_FILE):
+    if cfg["type"] == "nfs":
+        # NFS carries real uids on the wire; no mapping to do.
+        return "_netdev,nofail,soft,timeo=100,retrans=2"
+    uid, gid = _nas_mpd_ids()
+    opts = ["credentials=" + cred_file, "vers=3.0",
+            "file_mode=0644", "dir_mode=0755",
+            "_netdev", "nofail", "soft"]
+    if uid is not None:
+        opts.insert(1, "uid=%d" % uid)
+    if gid is not None:
+        opts.insert(2, "gid=%d" % gid)
+    return ",".join(opts)
+
+
+def nas_write_credentials(cfg, path=NAS_CRED_FILE):
+    """Root-only credentials file. Never echoed back by any endpoint."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write("username=%s\npassword=%s\n" % (cfg["user"], cfg["password"]))
+    os.chmod(path, 0o600)
+
+
+def nas_unit_name(suffix, path=NAS_MOUNT_POINT):
+    out = _run(["systemd-escape", "--path", "--suffix=" + suffix, path]).strip()
+    if out:
+        return out
+    # systemd-escape missing shouldn't be fatal — this is the same transform.
+    return path.strip("/").replace("-", "\\x2d").replace("/", "-") + "." + suffix
+
+
+NAS_MOUNT_ERRORS = (
+    ("permission denied",     "The NAS rejected that username or password."),
+    ("logon_failure",         "The NAS rejected that username or password."),
+    ("access_denied",         "That account can't open this share."),
+    ("bad_network_name",      "The server is reachable but has no share by that name."),
+    ("no such file",          "The server is reachable but has no share by that name."),
+    ("host is down",          "No answer from the server. Check the IP address."),
+    ("no route to host",      "No answer from the server. Check the IP address."),
+    ("connection refused",    "The server refused the connection — is file sharing switched on?"),
+    ("timed out",             "The server didn't answer in time."),
+    ("unable to resolve",     "That server name couldn't be resolved. Use an IP address."),
+    ("not found",             "Support for this share type isn't installed on the Pi."),
+    # apt failed during install or update, so the kernel has no helper for this
+    # filesystem. Worth naming the fix — the raw message means nothing.
+    ("unknown filesystem type",
+     "Support for this share type isn't installed. Run the SquarePi updater, or: "
+     "sudo apt install cifs-utils nfs-common"),
+    ("wrong fs type",
+     "Support for this share type isn't installed. Run the SquarePi updater, or: "
+     "sudo apt install cifs-utils nfs-common"),
+)
+
+
+def _nas_explain(stderr):
+    low = (stderr or "").lower()
+    for needle, friendly in NAS_MOUNT_ERRORS:
+        if needle in low:
+            return friendly
+    return (stderr or "The mount failed and gave no reason.").strip().splitlines()[-1][:200]
+
+
+def nas_try_mount(cfg, target, cred_file=NAS_CRED_FILE):
+    """Mount cfg at target. Returns (ok, message). Never raises."""
+    try:
+        proc = subprocess.run(
+            ["mount", "-t", cfg["type"], "-o", nas_mount_options(cfg, cred_file),
+             nas_source(cfg), target],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=45)
+    except subprocess.TimeoutExpired:
+        return False, "The server didn't answer in time."
+    except FileNotFoundError:
+        return False, ("The mount command is missing. Run the SquarePi updater, or: "
+                       "sudo apt install cifs-utils nfs-common")
+    except Exception as exc:
+        return False, str(exc)[:200]
+    if proc.returncode == 0:
+        return True, "Connected."
+    return False, _nas_explain(proc.stdout.decode("utf-8", "replace"))
+
+
+def nas_test(cfg):
+    """Mount to a scratch directory, then unmount. This is the whole point of
+    doing it in a UI: the user sees the real reason instead of an empty folder."""
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="squarepi-nas-")
+    cred = tmp + ".cred"
+    try:
+        # A scratch credentials file, so a failed test never overwrites the
+        # working one already on disk.
+        if cfg["type"] == "cifs":
+            nas_write_credentials(cfg, cred)
+        ok, msg = nas_try_mount(cfg, tmp, cred)
+
+        if ok:
+            try:
+                count = len(os.listdir(tmp))
+                if count:
+                    msg = "Connected — %d item%s visible." % (
+                        count, "" if count == 1 else "s")
+                else:
+                    # A successful mount of an empty share. Say so plainly:
+                    # "0 items visible" reads like something went wrong.
+                    msg = ("Connected, but the folder is empty. "
+                           "The share works — there is just no music in it yet.")
+            except Exception:
+                pass
+            subprocess.run(["umount", "-l", tmp], stderr=subprocess.DEVNULL)
+        return ok, msg
+    finally:
+        for path in (cred,):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        try:
+            os.rmdir(tmp)
+        except OSError:
+            pass
+
+
+NAS_MOUNT_UNIT_TMPL = """\
+[Unit]
+Description=SquarePi network music share
+Documentation=https://github.com/sijah/SquarePi
+After=network-online.target
+Wants=network-online.target
+# Before, NOT After, mpd.service — the same shutdown-ordering fix the USB mount
+# unit got in 1.6.4. systemd stops units in reverse start order, so a mount that
+# outlives MPD is torn down while MPD is still watching it; MPD's auto_update
+# inotify sees the folder empty, purges those tracks and saves an emptied queue.
+# Ordering Before mpd.service means MPD is stopped first and is already gone when
+# the share goes away. (Ordering only — this does not pull the mount in at boot;
+# it stays automount-triggered.)
+Before=mpd.service
+
+[Mount]
+What=%(what)s
+Where=%(where)s
+Type=%(type)s
+Options=%(options)s
+TimeoutSec=30
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+# NOTE: the automount deliberately carries NO network-online ordering. An
+# automount unit is implicitly Before=local-fs.target (its mountpoint must exist
+# early), and network-online.target is reached late, after sysinit.target — so
+# `After=network-online.target` here closed an ordering cycle
+#   local-fs.target → nas.automount → network-online.target → sysinit.target → local-fs.target
+# which systemd broke by deleting local-fs.target's start job. myMPD (Requires=
+# local-fs.target, no matching After=) then never started — "music plays, no web
+# UI", intermittently, depending on which job systemd cut. Reproduced on hardware
+# 2026-07-26. The automount needs no network to merely EXIST; only the .mount it
+# triggers does, and that unit keeps its network-online deps above.
+NAS_AUTOMOUNT_UNIT_TMPL = """\
+[Unit]
+Description=SquarePi network music share (automount)
+
+[Automount]
+Where=%(where)s
+# Deliberately NO TimeoutIdleSec. An idle-unmounted autofs path still exists and
+# reads as an EMPTY directory — and MPD's auto_update treats an empty directory as
+# "these files were deleted", purging them from the database, which prunes them
+# from the play queue. An idle timeout would recreate that window every few
+# minutes of quiet. Confirmed on hardware: a share that went away came back to an
+# empty queue. Mounting on first access is still what keeps a sleeping NAS from
+# delaying boot, which is the reason this is an automount at all — it just stays
+# mounted once something has touched it.
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def nas_write_units(cfg):
+    """Write the .mount/.automount pair. Only the automount is enabled, so a NAS
+    that is asleep or absent delays nothing at boot — the mount happens the first
+    time something reads the folder, and retries next time if it fails."""
+    mount_unit = nas_unit_name("mount")
+    auto_unit = nas_unit_name("automount")
+    fields = {"what": nas_source(cfg), "where": NAS_MOUNT_POINT,
+              "type": cfg["type"], "options": nas_mount_options(cfg)}
+    with open("/etc/systemd/system/" + mount_unit, "w") as f:
+        f.write(NAS_MOUNT_UNIT_TMPL % fields)
+    with open("/etc/systemd/system/" + auto_unit, "w") as f:
+        f.write(NAS_AUTOMOUNT_UNIT_TMPL % {"where": NAS_MOUNT_POINT})
+    return mount_unit, auto_unit
+
+
+def nas_save_config(cfg):
+    """Everything except the password, which lives only in the root-only
+    credentials file."""
+    record = {k: cfg[k] for k in ("type", "host", "share", "user")}
+    try:
+        os.makedirs(os.path.dirname(NAS_CONF_FILE), exist_ok=True)
+        tmp = NAS_CONF_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(record, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, NAS_CONF_FILE)
+    except Exception:
+        pass
+
+
+def nas_load_config():
+    try:
+        with open(NAS_CONF_FILE) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def nas_is_mounted():
+    """True only when a REAL share is mounted at the point — not merely the autofs
+    stub the enabled automount leaves there.
+
+    os.path.ismount() returns True for the idle automount point too (autofs is a
+    filesystem, so its st_dev differs from the parent's), so it reported the share
+    "Connected" whenever the automount was enabled — including after a reboot
+    before anything has touched the folder, or while the NAS is switched off. Read
+    /proc/self/mounts and require an actual filesystem there, i.e. anything but
+    autofs. Our mount point contains no spaces, so no octal-unescaping is needed.
+    """
+    try:
+        with open("/proc/self/mounts") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 3 and parts[1] == NAS_MOUNT_POINT and parts[2] != "autofs":
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def nas_status():
+    cfg = nas_load_config()
+    return {
+        "configured": bool(cfg),
+        "type":  (cfg or {}).get("type", "cifs"),
+        "host":  (cfg or {}).get("host", ""),
+        "share": (cfg or {}).get("share", ""),
+        "user":  (cfg or {}).get("user", ""),
+        "mounted": nas_is_mounted(),
+        "mount_point": NAS_MOUNT_POINT,
+    }
+
+
+def nas_connect(cfg):
+    """Validate, prove it mounts, then persist. Nothing is written to disk until
+    the share has actually answered — a saved config always worked at least once."""
+    with _NAS_LOCK:
+        ok, msg = nas_test(cfg)
+        if not ok:
+            return False, msg
+
+        try:
+            os.makedirs(NAS_MOUNT_POINT, exist_ok=True)
+            if cfg["type"] == "cifs":
+                nas_write_credentials(cfg)
+            else:
+                try:
+                    os.unlink(NAS_CRED_FILE)
+                except OSError:
+                    pass
+            mount_unit, auto_unit = nas_write_units(cfg)
+        except Exception as exc:
+            return False, "Couldn't write the mount settings: %s" % str(exc)[:120]
+
+        subprocess.run(["systemctl", "daemon-reload"], stderr=subprocess.DEVNULL)
+        subprocess.run(["systemctl", "enable", "--now", auto_unit],
+                       stderr=subprocess.DEVNULL)
+        subprocess.run(["systemctl", "start", mount_unit], stderr=subprocess.DEVNULL)
+
+        nas_save_config(cfg)
+        subprocess.run(["mpc", "update", "nas"], stderr=subprocess.DEVNULL)
+        return True, msg + " Scanning for music…"
+
+
+def nas_disconnect():
+    with _NAS_LOCK:
+        mount_unit = nas_unit_name("mount")
+        auto_unit = nas_unit_name("automount")
+        for unit in (auto_unit, mount_unit):
+            subprocess.run(["systemctl", "disable", "--now", unit],
+                           stderr=subprocess.DEVNULL)
+        subprocess.run(["umount", "-l", NAS_MOUNT_POINT], stderr=subprocess.DEVNULL)
+        for path in ("/etc/systemd/system/" + mount_unit,
+                     "/etc/systemd/system/" + auto_unit,
+                     NAS_CRED_FILE, NAS_CONF_FILE):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        subprocess.run(["systemctl", "daemon-reload"], stderr=subprocess.DEVNULL)
+        try:
+            os.rmdir(NAS_MOUNT_POINT)
+        except OSError:
+            pass
+        subprocess.run(["mpc", "update", "nas"], stderr=subprocess.DEVNULL)
+        return True, "Disconnected."
 
 
 # ── Host health (Pi-side, separate from the amp's own hardware faults above) ────
@@ -301,14 +837,14 @@ def get_host_health():
     return {key: fn() for key, _, fn in HOST_HEALTH_CHECKS}
 
 
-def get_balance():
+def get_balance(snap=None):
     """
     Read balance from Channel L/R Gain.
     Returns int in [-20, 20]. Positive = right louder, negative = left louder.
     ALSA range: 0-110 where 110 = 0 dB.
     """
-    l_raw = amixer_get_int("Channel Left Gain")
-    r_raw = amixer_get_int("Channel Right Gain")
+    l_raw = snap_int(snap, "Channel Left Gain")
+    r_raw = snap_int(snap, "Channel Right Gain")
     return max(-20, min(20, r_raw - l_raw))
 
 
@@ -508,23 +1044,38 @@ def _update_check_thread():
 
 
 def get_state():
-    """Return all DSP state in one call."""
-    bands = {label: amixer_get(ctrl) for label, ctrl in BANDS}
+    """Return all DSP state in one call.
+
+    Every ALSA read here comes from a single `amixer contents` snapshot. This is
+    the page's first request and it used to spawn 37 amixer processes back to
+    back, which was most of the wait before first paint. If the snapshot comes
+    back empty each helper falls through to its own read, so the page still fills
+    in correctly — just as slowly as it used to.
+
+    BT volume is left out of the snapshot deliberately: "BT Volume" is a softvol
+    control that only exists once something has played over Bluetooth, and
+    get_bt_volume() already handles it being absent.
+    """
+    snap = amixer_contents()
+    bands = {label: snap_int(snap, ctrl) for label, ctrl in BANDS}
     return {
         "bands":       bands,
-        "gain":        amixer_get_int("Analog Gain"),
-        "balance":     get_balance(),
+        "gain":        snap_int(snap, "Analog Gain"),
+        "balance":     get_balance(snap),
         "bt_volume":   get_bt_volume(),
-        "eq_enabled":  amixer_get_enum("Equalizer") != "Off",
-        "mixer_mode":  amixer_get_enum("Mixer Mode") or "Stereo",
+        "eq_enabled":  snap_enum(snap, "Equalizer") != "Off",
+        "mixer_mode":  snap_enum(snap, "Mixer Mode") or "Stereo",
         "matrix": {
-            "l2l": amixer_get_int(MATRIX_CONTROLS["l2l"]),
-            "r2l": amixer_get_int(MATRIX_CONTROLS["r2l"]),
-            "l2r": amixer_get_int(MATRIX_CONTROLS["l2r"]),
-            "r2r": amixer_get_int(MATRIX_CONTROLS["r2r"]),
+            "l2l": snap_int(snap, MATRIX_CONTROLS["l2l"]),
+            "r2l": snap_int(snap, MATRIX_CONTROLS["r2l"]),
+            "l2r": snap_int(snap, MATRIX_CONTROLS["l2r"]),
+            "r2r": snap_int(snap, MATRIX_CONTROLS["r2r"]),
         },
-        "faults": get_faults(),
+        "faults": get_faults(snap),
         "health": get_host_health(),
+        # Rides along here rather than in its own request, so the SYSTEM card's
+        # toggle costs the page nothing extra on load.
+        "resume_on_boot": get_resume_on_boot(),
     }
 
 
@@ -707,6 +1258,20 @@ HTML = r"""<!DOCTYPE html>
   .sys-led.err { background:var(--red); box-shadow:0 0 6px var(--red); animation:blink 1s infinite; }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
   .faults-section-title { font-size:0.6rem; color:var(--label); letter-spacing:0.12em; text-transform:uppercase; margin:10px 0 8px; }
+  .nas-form { display:grid; grid-template-columns:auto 1fr; gap:8px 10px; align-items:center; margin-bottom:11px; }
+  .nas-form label { font-size:0.6rem; color:var(--mut); letter-spacing:0.1em; text-transform:uppercase; }
+  /* max-width on the FIELD, not on the grid track: an `auto` label track
+     absorbs leftover space and shoves the inputs to the right edge. */
+  .nas-form input, .nas-form select { background:var(--sur); color:var(--txt); border:1px solid var(--bdr); border-radius:2px; padding:6px 11px; font-size:0.65rem; font-family:inherit; outline:none; letter-spacing:0.04em; width:100%; max-width:340px; box-sizing:border-box; }
+  .nas-form input:focus, .nas-form select:focus { border-color:var(--acc); }
+  .nas-form input::placeholder { color:var(--mut); }
+  .nas-btn-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:9px; }
+  .nas-msg { font-size:0.6rem; line-height:1.5; min-height:16px; letter-spacing:0.04em; margin-bottom:8px; }
+  .nas-msg.ok { color:var(--grn); }
+  .nas-msg.err { color:var(--red); }
+  .nas-msg.busy { color:var(--mut); }
+  .nas-state { display:flex; align-items:center; gap:7px; font-size:0.6rem; color:var(--mut); letter-spacing:0.06em; }
+  .hint-line { font-size:0.58rem; color:var(--mut); line-height:1.5; margin:-4px 0 10px; max-width:46ch; }
   .faults-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-bottom:13px; }
   .fault-item { display:flex; flex-direction:column; align-items:center; gap:5px; background:var(--sur); border:1px solid var(--bdr); border-radius:4px; padding:8px 4px; }
   .fdot { width:8px; height:8px; border-radius:50%; background:var(--grn); box-shadow:0 0 5px var(--grn); flex-shrink:0; transition:all 0.3s; }
@@ -761,12 +1326,26 @@ HTML = r"""<!DOCTYPE html>
     .columns { grid-template-columns:1fr; }
     .sidebar { display:none; }
 
-    /* Top bar: brand subtitle is the first thing to go; whatever still
-       doesn't fit scrolls horizontally instead of clipping off-screen
-       (buttons like POWER must stay reachable, not just visible-on-desktop). */
-    .topbar { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    /* Top bar: brand subtitle is the first thing to go; whatever still doesn't
+       fit wraps onto a second line.
+       NOT overflow-x:auto, which is what this used to do -- setting one axis to
+       auto forces the other to compute to auto as well, so the bar became a
+       clipping box and the POWER / UPDATE dropdowns (position:absolute, below
+       the bar) were cut off entirely on a phone. z-index can't rescue that:
+       clipping happens before stacking. Wrapping keeps the buttons reachable,
+       which is the point. */
+    .topbar { flex-wrap:wrap; padding:6px 14px; }
     .topbar-brand { width:auto; }
+    .topbar-center { flex-basis:100%; order:3; height:0; }
     .brand-sub { display:none; }
+    .topbar-actions { flex-wrap:wrap; }
+
+    /* Network share form: one column, labels above their fields. The desktop
+       `auto 1fr` sizes the label track to "PASSWORD" in letter-spaced caps,
+       which leaves an IP address about 150px to live in. */
+    .nas-form { grid-template-columns:1fr; gap:3px 0; }
+    .nas-form label { margin-top:5px; }
+    .nas-form input, .nas-form select { max-width:none; }
 
     /* 15-band EQ rack: don't let grid tracks fight the viewport down to
        illegible slivers. Give every band a fixed usable width and let the
@@ -839,6 +1418,9 @@ HTML = r"""<!DOCTYPE html>
     <div class="nav-divider"></div>
     <div class="nav-item" data-s="system" onclick="navTo('system')">
       <span class="nav-icon">&#9633;</span>SYSTEM
+    </div>
+    <div class="nav-item" data-s="nas" onclick="navTo('nas')">
+      <span class="nav-icon">&#9673;</span>NETWORK
     </div>
   </div>
   <div class="device-info">
@@ -1058,9 +1640,58 @@ HTML = r"""<!DOCTYPE html>
     <div class="faults-grid" id="faults-grid"></div>
     <div class="faults-section-title">Host Health</div>
     <div class="faults-grid" id="health-grid"></div>
+    <div class="faults-section-title">Startup</div>
+    <div class="toggle-row">
+      <span class="toggle-lbl">Resume playback after restart</span>
+      <button class="tog" id="resume-on"  onclick="setResumeOnBoot(true)">ON</button>
+      <button class="tog" id="resume-off" onclick="setResumeOnBoot(false)">OFF</button>
+    </div>
+    <div class="hint-line">Picks up where it left off if the power goes out mid-song.
+      Applies to your own music library only &mdash; Bluetooth, AirPlay and Spotify
+      are controlled by the device that sent them.</div>
     <div class="save-row">
       <span class="status" id="status"></span>
     </div>
+  </div>
+</div>
+
+<div class="card" id="card-nas">
+  <div class="card-hdr">
+    <span class="card-title" onclick="toggleCard('nas'); loadNas();"><span class="card-caret">&#x25BA;</span> NETWORK SHARE</span>
+    <div class="eq-hdr-ctrls">
+      <div class="nas-state"><span class="fdot na" id="nas-led"></span><span id="nas-state-txt">Not set up</span></div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="hint-line">Play music straight off a NAS or a shared folder on your
+      computer. It appears in myMPD as <strong>nas</strong>, alongside your library.</div>
+    <div class="nas-form">
+      <label for="nas-type">Type</label>
+      <select id="nas-type" onchange="onNasType()">
+        <option value="cifs">SMB / Windows share</option>
+        <option value="nfs">NFS</option>
+      </select>
+      <label for="nas-host">Server</label>
+      <input type="text" id="nas-host" maxlength="253" placeholder="192.168.1.50">
+      <label for="nas-share">Folder</label>
+      <input type="text" id="nas-share" maxlength="255" placeholder="Music">
+      <label for="nas-user" id="nas-user-lbl">User</label>
+      <input type="text" id="nas-user" maxlength="128" placeholder="leave empty for a public share" autocomplete="off">
+      <label for="nas-pass" id="nas-pass-lbl">Password</label>
+      <input type="password" id="nas-pass" maxlength="256" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="new-password">
+    </div>
+    <div class="nas-msg" id="nas-msg"></div>
+    <div class="nas-btn-row">
+      <button class="save-btn" id="nas-test-btn" onclick="nasTest()">Test connection</button>
+      <button class="save-btn" id="nas-connect-btn" onclick="nasConnect()">&#9632; Connect &amp; save</button>
+      <button class="save-btn" id="nas-rescan-btn" onclick="nasRescan()">Rescan</button>
+      <button class="save-btn" id="nas-remove-btn" onclick="nasDisconnect()">Remove</button>
+    </div>
+    <div class="hint-line">Use the server's IP address rather than a
+      <em>.local</em> name &mdash; names can't be looked up early enough when the
+      Pi reconnects on its own after a restart. The share is only mounted when
+      something reads it, so a NAS that's asleep or switched off never holds up
+      startup.</div>
   </div>
 </div>
 
@@ -1184,9 +1815,20 @@ function toggleCard(id){
   // display:none that's 0x0, so redraw once real dimensions are back.
   if (id === 'eq' && !isCollapsed && typeof drawCurve === 'function') drawCurve();
 }
+// Cards that start folded away the first time this browser opens the page.
+// Only applied when no preference has been stored yet — after that the user's
+// own choice wins, including choosing to leave one open.
+const DEFAULT_COLLAPSED = ['nas'];
 function initCollapsed(){
-  let collapsed = [];
-  try { collapsed = JSON.parse(localStorage.getItem('squarepi-collapsed') || '[]'); } catch(e){}
+  let collapsed = null;
+  try { collapsed = JSON.parse(localStorage.getItem('squarepi-collapsed')); } catch(e){}
+  if (!Array.isArray(collapsed)) {
+    // Folding a card away is only reasonable when there is a nav item to find
+    // it with. The sidebar is hidden below 680px, so on a phone a folded card
+    // is just a header buried down a long page -- start expanded instead.
+    collapsed = window.innerWidth <= 680 ? [] : DEFAULT_COLLAPSED.slice();
+    try { localStorage.setItem('squarepi-collapsed', JSON.stringify(collapsed)); } catch(e){}
+  }
   collapsed.forEach(id => {
     const card = document.getElementById('card-' + id);
     if (card) card.classList.add('collapsed');
@@ -1228,6 +1870,90 @@ function pollNowPlaying(){
 function animateNpVu(){
   const vu=document.getElementById('np-vu');
   if(vu && vu.style.display!=='none'){ [].forEach.call(vu.children,b=>{ b.style.height=(4+Math.random()*14)+'px'; }); }
+}
+
+// ── Network share ───────────────────────────────────────────────────────────────
+// Fetched lazily when the card is first opened — never on page load.
+let nasLoaded = false, nasBusy = false;
+
+function nasMsg(text, kind){
+  const el = document.getElementById('nas-msg');
+  if (el) { el.textContent = text || ''; el.className = 'nas-msg' + (kind ? ' ' + kind : ''); }
+}
+function nasSetBusy(on){
+  nasBusy = on;
+  ['nas-test-btn','nas-connect-btn','nas-rescan-btn','nas-remove-btn'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = on;
+  });
+}
+function onNasType(){
+  // NFS has no username or password — the server maps by uid.
+  const smb = document.getElementById('nas-type').value === 'cifs';
+  ['nas-user','nas-pass','nas-user-lbl','nas-pass-lbl'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = smb ? '' : 'none';
+  });
+  const host = document.getElementById('nas-host');
+  const share = document.getElementById('nas-share');
+  if (host)  host.placeholder  = '192.168.1.50';
+  if (share) share.placeholder = smb ? 'Music' : '/volume1/Music';
+}
+function paintNas(s){
+  const led = document.getElementById('nas-led');
+  const txt = document.getElementById('nas-state-txt');
+  if (led) led.className = 'fdot ' + (s.mounted ? '' : (s.configured ? 'warn' : 'na'));
+  if (txt) txt.textContent = s.mounted ? 'Connected'
+         : (s.configured ? 'Saved, not mounted' : 'Not set up');
+  const rm = document.getElementById('nas-remove-btn');
+  const rs = document.getElementById('nas-rescan-btn');
+  if (rm) rm.style.display = s.configured ? '' : 'none';
+  if (rs) rs.style.display = s.configured ? '' : 'none';
+  if (s.configured) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el && !el.value) el.value = v; };
+    const type = document.getElementById('nas-type');
+    if (type) { type.value = s.type || 'cifs'; }
+    set('nas-host', s.host || '');
+    set('nas-share', (s.share || '').replace(/^\//, ''));
+    set('nas-user', s.user || '');
+  }
+  onNasType();
+}
+function loadNas(){
+  if (nasLoaded) return;
+  nasLoaded = true;
+  fetch('/api/nas').then(r => r.json()).then(paintNas).catch(() => { nasLoaded = false; });
+}
+function nasPayload(){
+  return {
+    type:  document.getElementById('nas-type').value,
+    host:  document.getElementById('nas-host').value.trim(),
+    share: document.getElementById('nas-share').value.trim(),
+    user:  document.getElementById('nas-user').value.trim(),
+    password: document.getElementById('nas-pass').value,
+  };
+}
+function nasCall(url, payload, busyText){
+  if (nasBusy) return;
+  nasSetBusy(true);
+  nasMsg(busyText, 'busy');
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify(payload || {})})
+    .then(r => r.json())
+    .then(d => {
+      nasMsg(d.message || (d.ok ? 'Done.' : 'That did not work.'), d.ok ? 'ok' : 'err');
+      if (d.status) paintNas(d.status);
+    })
+    .catch(() => nasMsg('The speaker stopped responding — reload the page.', 'err'))
+    .then(() => nasSetBusy(false));
+}
+function nasTest(){ nasCall('/api/nas/test', nasPayload(), 'Trying to reach the server…'); }
+function nasConnect(){ nasCall('/api/nas/connect', nasPayload(), 'Connecting…'); }
+function nasRescan(){ nasCall('/api/nas/rescan', {}, 'Rescanning…'); }
+function nasDisconnect(){
+  if (!confirm('Remove this network share? Your music stays on the NAS — it just stops appearing on the speaker.')) return;
+  document.getElementById('nas-pass').value = '';
+  nasCall('/api/nas/disconnect', {}, 'Removing…');
 }
 
 // ── A/B compare ─────────────────────────────────────────────────────────────────
@@ -1547,6 +2273,19 @@ function setEqBypass(on) {
   post('/api/eq-bypass', {enabled: on});
 }
 
+// ── Resume playback after restart ──────────────────────────────────────────────
+function paintResumeOnBoot(on) {
+  const a = document.getElementById('resume-on'), b = document.getElementById('resume-off');
+  if (a) a.classList.toggle('active', on);
+  if (b) b.classList.toggle('active', !on);
+}
+function setResumeOnBoot(on) {
+  paintResumeOnBoot(on);
+  post('/api/resume-on-boot', {enabled: on});
+}
+// No loader of its own: the flag rides along in /api/status, so the toggle costs
+// the page nothing extra on load.
+
 // ── Gain & Balance ─────────────────────────────────────────────────────────────
 function setGainDisplay(v) {
   const db = ((parseInt(v) - 31) * 0.5).toFixed(1);
@@ -1680,6 +2419,7 @@ function loadState() {
     buildFaults(s.faults ?? {});
     buildHealth(s.health ?? {});
     updateHealthLed(s.faults ?? {}, s.health ?? {});
+    paintResumeOnBoot(s.resume_on_boot !== false);
     abInit();
     suppressDirty = false;
   }).catch(() => { buildEq(null); buildFaults(null); buildHealth(null); suppressDirty = false; });
@@ -1697,6 +2437,10 @@ function loadSysInfo() {
 // ── Sidebar nav ────────────────────────────────────────────────────────────────
 function navTo(id) {
   const el = document.getElementById('card-' + id);
+  // Jumping to a card the user has folded away should open it — otherwise the
+  // click scrolls to a title bar and looks like it did nothing.
+  if (el && el.classList.contains('collapsed')) toggleCard(id);
+  if (id === 'nas') loadNas();
   if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   const ni = document.querySelector('.nav-item[data-s="' + id + '"]');
@@ -1712,6 +2456,8 @@ function toggleBypass() {
 
 initTheme();
 initCollapsed();
+// Only if the user left the share card open — otherwise it stays unfetched.
+if (!document.getElementById('card-nas').classList.contains('collapsed')) loadNas();
 renderSparklines();
 initCurveDrag();
 loadCustomPresets();
@@ -1796,16 +2542,24 @@ class Handler(BaseHTTPRequestHandler):
             self._json({label: amixer_get(ctrl) for label, ctrl in BANDS})
 
         elif p == "/api/faults":
-            self._json(get_faults())
+            # One snapshot instead of 13 amixer spawns — this one polls every 10s.
+            self._json(get_faults(amixer_contents()))
 
         elif p == "/api/health":
             self._json(get_host_health())
 
         elif p == "/api/custom-presets":
-            self._json(CUSTOM_PRESETS)
+            with _PRESETS_LOCK:
+                self._json(dict(CUSTOM_PRESETS))
 
         elif p == "/api/bt-volume":
             self._json({"volume": get_bt_volume()})
+
+        elif p == "/api/nas":
+            # Deliberately NOT part of /api/state: that runs once on page load
+            # and was just cut to a single amixer call. A filesystem probe
+            # belongs behind its own lazy fetch, not in front of the EQ.
+            self._json(nas_status())
 
         elif p == "/api/nowplaying":
             self._json(get_now_playing())
@@ -1874,6 +2628,34 @@ class Handler(BaseHTTPRequestHandler):
             set_bt_volume(pct)
             self._json({"ok": True})
 
+        elif p == "/api/nas/test":
+            cfg, err = nas_validate(data)
+            if err:
+                self._json({"ok": False, "message": err})
+            else:
+                ok, msg = nas_test(cfg)
+                self._json({"ok": ok, "message": msg})
+
+        elif p == "/api/nas/connect":
+            cfg, err = nas_validate(data)
+            if err:
+                self._json({"ok": False, "message": err})
+            else:
+                ok, msg = nas_connect(cfg)
+                self._json({"ok": ok, "message": msg, "status": nas_status()})
+
+        elif p == "/api/nas/disconnect":
+            ok, msg = nas_disconnect()
+            self._json({"ok": ok, "message": msg, "status": nas_status()})
+
+        elif p == "/api/nas/rescan":
+            subprocess.run(["mpc", "update", "nas"], stderr=subprocess.DEVNULL)
+            self._json({"ok": True, "message": "Rescanning…"})
+
+        elif p == "/api/resume-on-boot":
+            enabled = set_resume_on_boot(bool(data.get("enabled", True)))
+            self._json({"ok": True, "enabled": enabled})
+
         elif p == "/api/store":
             subprocess.run(["alsactl", "store"], stderr=subprocess.DEVNULL)
             self._json({"ok": True})
@@ -1881,10 +2663,12 @@ class Handler(BaseHTTPRequestHandler):
         elif p == "/api/custom-preset/save":
             name = str(data.get("name", "")).strip()[:24]
             values = [max(BAND_MIN, min(BAND_MAX, int(v))) for v in data.get("values", [0]*15)]
-            if name and len(values) == 15:
-                CUSTOM_PRESETS[name] = values
-                save_custom_presets(CUSTOM_PRESETS)
-            self._json({"ok": True, "customs": CUSTOM_PRESETS})
+            with _PRESETS_LOCK:
+                if name and len(values) == 15:
+                    CUSTOM_PRESETS[name] = values
+                    save_custom_presets(CUSTOM_PRESETS)
+                snapshot = dict(CUSTOM_PRESETS)
+            self._json({"ok": True, "customs": snapshot})
 
         elif p == "/api/custom-preset/apply":
             values = [max(BAND_MIN, min(BAND_MAX, int(v))) for v in data.get("values", [0]*15)]
@@ -1896,9 +2680,11 @@ class Handler(BaseHTTPRequestHandler):
 
         elif p == "/api/custom-preset/delete":
             name = str(data.get("name", "")).strip()
-            CUSTOM_PRESETS.pop(name, None)
-            save_custom_presets(CUSTOM_PRESETS)
-            self._json({"ok": True, "customs": CUSTOM_PRESETS})
+            with _PRESETS_LOCK:
+                CUSTOM_PRESETS.pop(name, None)
+                save_custom_presets(CUSTOM_PRESETS)
+                snapshot = dict(CUSTOM_PRESETS)
+            self._json({"ok": True, "customs": snapshot})
 
         elif p == "/api/power":
             action = data.get("action")
@@ -1916,7 +2702,13 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     threading.Thread(target=_bt_vol_restore_thread, daemon=True).start()
     threading.Thread(target=_update_check_thread, daemon=True).start()
-    server = HTTPServer(("0.0.0.0", 8081), Handler)
+    # Threading, so one slow request does not hold up the rest of the page. The
+    # page fires three requests at once on load (custom presets, now playing,
+    # full DSP state); single-threaded they queued behind whichever was slowest.
+    # The one piece of shared mutable state, CUSTOM_PRESETS, is guarded by
+    # _PRESETS_LOCK. ALSA reads and writes go out as separate amixer processes,
+    # which the kernel serialises per control.
+    server = ThreadingHTTPServer(("0.0.0.0", 8081), Handler)
     print("[SquarePi DSP] Listening on http://0.0.0.0:8081")
     try:
         server.serve_forever()

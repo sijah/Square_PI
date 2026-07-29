@@ -565,6 +565,416 @@ fi
 # =============================================================================
 
 # =============================================================================
+# ### v1.6.4 DELTA — EQ web UI first-load speed; USB play queue survives a
+# ### reboot; installer rejects typo'd flags
+# ### (released 2026-07-26; brings any pre-1.6.4 install forward)
+# ###
+# ### Gated on version, not just internal state: an install already at 1.6.4+
+# ### skips this whole block on every future run.
+# ###
+# ### The flag-validation half of this release lives entirely in install.sh and
+# ### needs no migration. What follows is the USB queue fix, which is four
+# ### coordinated changes to files install.sh generates on the box. They are
+# ### patched in place rather than re-fetched: these files are written by
+# ### heredoc, not stored in the repo, and the mount root is whatever the
+# ### original install chose.
+# =============================================================================
+USB_MOUNT_UNIT="/etc/systemd/system/squarepi-usb-mount@.service"
+USB_MOUNT_SH="/usr/local/bin/squarepi-usb-mount.sh"
+USB_UMOUNT_SH="/usr/local/bin/squarepi-usb-umount.sh"
+
+if version_lt "${CURRENT_VER}" "1.6.4"; then
+
+if [[ -f "${EQ_SERVER_DEST}" ]] || unit_exists squarepi-eq.service; then
+  step "Updating EQ web server (faster first page load)"
+  if fetch_repo_file "eq-server.py" "${EQ_SERVER_DEST}"; then
+    chmod +x "${EQ_SERVER_DEST}"
+    success "eq-server.py updated"
+    APPLIED+=(
+      "EQ web UI loads much faster: the first page request read all 37 amp controls as 37 separate amixer processes, one after another — it is now a single call"
+      "EQ web server is multi-threaded, so the three requests the page fires on load no longer queue behind each other"
+      "Custom EQ presets are written atomically, so a save can no longer be seen half-written (the local display reads that file and would have shown no presets at all)"
+    )
+  else
+    warn "Could not fetch eq-server.py — leaving the existing one in place"
+  fi
+else
+  info "EQ web server not installed — skipping eq-server.py update"
+fi
+
+step "Making the play queue survive a reboot (USB libraries)"
+USB_FIXED=0
+
+# 1of4 — MPD flushed the queue to disk only every 120s by default, so a power
+# cut just after queueing lost it regardless of anything else here.
+if [[ -f /etc/mpd.conf ]]; then
+  if ! grep -qE '^[[:space:]]*state_file_interval' /etc/mpd.conf; then
+    sed -i '/^state_file[[:space:]]/a state_file_interval "30"' /etc/mpd.conf
+    info "mpd.conf: state_file_interval set to 30s (was MPD's 120s default)"
+    USB_FIXED=1
+  fi
+  # 2of4 — USB drives mount after mpd starts, so a restored queue of USB tracks
+  # would have MPD erroring through files that are not there yet.
+  if ! grep -qE '^[[:space:]]*restore_paused' /etc/mpd.conf; then
+    sed -i '/^state_file[[:space:]]/a restore_paused     "yes"' /etc/mpd.conf
+    info "mpd.conf: restore_paused enabled — MPD comes back paused, not playing"
+    USB_FIXED=1
+  fi
+fi
+
+# 3of4 — the root cause. systemd stops units in reverse order, so After=mpd
+# tore the mount down while MPD was still up; MPD's inotify watch saw the drive
+# vanish, purged those songs, and pruned them from the queue it then saved.
+if [[ -f "${USB_MOUNT_UNIT}" ]] && grep -qE '^After=mpd\.service' "${USB_MOUNT_UNIT}"; then
+  sed -i 's#^After=mpd\.service#Before=mpd.service#' "${USB_MOUNT_UNIT}"
+  info "USB mount unit reordered Before=mpd.service (was After=, which emptied the queue on shutdown)"
+  USB_FIXED=1
+fi
+
+# 4of4 — belt and braces on both helpers: never refresh the database while MPD
+# is down (boot) or on the way out (shutdown).
+if [[ -f "${USB_MOUNT_SH}" ]] && ! grep -q 'is-active --quiet mpd' "${USB_MOUNT_SH}"; then
+  sed -i 's#^[[:space:]]*mpc update "usb/\$1".*#  if systemctl is-active --quiet mpd; then mpc update "usb/$1" >/dev/null 2>\&1 || true; fi#' "${USB_MOUNT_SH}"
+  info "USB mount helper no longer blocks on a stopped MPD at boot"
+  USB_FIXED=1
+fi
+
+if [[ -f "${USB_UMOUNT_SH}" ]] && ! grep -q 'is-system-running' "${USB_UMOUNT_SH}"; then
+  sed -i 's#^[[:space:]]*mpc update "usb".*#[[ "$(systemctl is-system-running 2>/dev/null)" == "stopping" ]] || mpc update "usb" >/dev/null 2>\&1 || true#' "${USB_UMOUNT_SH}"
+  info "USB unmount helper skips the database refresh during shutdown"
+  USB_FIXED=1
+fi
+
+# -----------------------------------------------------------------------------
+# Resume playback after a restart.
+#
+# NOTE: these two scripts and units are duplicated from install.sh rather than
+# fetched, because install.sh generates them with heredocs — they are not files
+# in the repo, so fetch_repo_file has nothing to pull. Any edit to them must be
+# made in BOTH places. Making them real repo files would remove this trap.
+# -----------------------------------------------------------------------------
+step "Installing resume-after-restart service"
+
+mkdir -p /var/lib/squarepi
+[[ -f /var/lib/squarepi/resume_on_boot ]] || echo "1" > /var/lib/squarepi/resume_on_boot
+
+cat > /usr/local/bin/squarepi-resume-mark.sh <<'EOF'
+#!/bin/bash
+# Runs BEFORE mpd.service. Records whether MPD was playing when the system last
+# went down, because MPD is about to overwrite that with "pause" (restore_paused).
+STATE_FILE="/var/lib/mpd/state"
+MARKER="/run/squarepi-resume"
+
+rm -f "${MARKER}"
+[[ -f "${STATE_FILE}" ]] || exit 0
+if grep -qE '^state: play$' "${STATE_FILE}"; then
+  touch "${MARKER}"
+fi
+exit 0
+EOF
+chmod +x /usr/local/bin/squarepi-resume-mark.sh
+
+cat > /usr/local/bin/squarepi-resume.sh <<'EOF'
+#!/bin/bash
+# Runs AFTER mpd.service. Presses play, but only once it is safe to.
+MARKER="/run/squarepi-resume"
+FLAG="/var/lib/squarepi/resume_on_boot"
+DEADLINE=$((SECONDS + 60))
+
+# Always clear the marker, whatever happens below: a resume that could not
+# complete this boot must not fire on the next one.
+cleanup() { rm -f "${MARKER}"; }
+trap cleanup EXIT
+
+[[ -f "${MARKER}" ]] || exit 0
+[[ "$(cat "${FLAG}" 2>/dev/null)" == "1" ]] || exit 0
+
+# Wait for MPD to answer. It is ordered before us, but "started" and "accepting
+# connections" are not the same instant.
+while ! mpc status >/dev/null 2>&1; do
+  (( SECONDS < DEADLINE )) || exit 0
+  sleep 2
+done
+
+# Nothing loaded means nothing to resume -- an empty queue, or a stop.
+[[ -n "$(mpc current 2>/dev/null)" ]] || exit 0
+
+# Do not start over the top of a phone. A device connected this early almost
+# certainly auto-reconnected and is the thing the user is listening to. This is a
+# heuristic -- connected is not the same as playing -- but erring towards "stay
+# quiet" is the right way to be wrong here: the queue is still loaded and paused,
+# and one press of play gets it back.
+if bluetoothctl devices Connected 2>/dev/null | grep -q .; then
+  exit 0
+fi
+
+# Wait for the file itself. This is the USB case: udev mounts the drive after
+# mpd starts, so the queue is restored before its files exist. A stream (http://)
+# has no local path and needs no wait.
+REL="$(mpc -f %file% current 2>/dev/null | head -n1)"
+case "${REL}" in
+  http://*|https://*|"") ;;
+  *)
+    while [[ ! -e "/var/lib/mpd/music/${REL}" ]]; do
+      (( SECONDS < DEADLINE )) || exit 0   # drive never showed up -- stay paused
+      sleep 2
+    done
+    ;;
+esac
+
+mpc play >/dev/null 2>&1 || true
+exit 0
+EOF
+chmod +x /usr/local/bin/squarepi-resume.sh
+
+cat > /etc/systemd/system/squarepi-resume-mark.service <<'EOF'
+[Unit]
+Description=SquarePi — record whether MPD was playing before this boot
+Before=mpd.service
+After=local-fs.target
+ConditionPathExists=/var/lib/mpd/state
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/squarepi-resume-mark.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/squarepi-resume.service <<'EOF'
+[Unit]
+Description=SquarePi — resume playback after a restart
+After=mpd.service squarepi-alsa-restore.service
+Wants=mpd.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=120
+ExecStart=/usr/local/bin/squarepi-resume.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable squarepi-resume-mark 2>/dev/null || true
+systemctl enable squarepi-resume 2>/dev/null || true
+success "Playback will resume after a restart (local library only)"
+APPLIED+=(
+  "Playback resumes after a restart: if the power goes out mid-song, the same track picks up where it left off on the next boot. Your own library only — Bluetooth, AirPlay and Spotify are controlled by the device that sent them. Toggle it in the EQ web UI under SYSTEM."
+)
+
+if [[ ${USB_FIXED} -eq 1 ]]; then
+  systemctl daemon-reload
+  success "USB queue-persistence fix applied"
+  APPLIED+=(
+    "The play queue now survives a reboot when your music is on a USB drive — previously the drive was unmounted while MPD was still running, so MPD purged those songs and saved an emptied queue"
+    "MPD restores paused instead of playing, so a restored queue waits for the USB drive to mount rather than erroring through missing files (and the speaker no longer starts on its own at boot)"
+    "MPD flushes the queue to disk every 30s instead of every 120s, so less is lost to a power cut"
+  )
+else
+  info "Nothing to patch here — no USB auto-mount files found, or the fix is already in place"
+fi
+
+else
+  info "v1.6.4 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v1.6.4 gate ---
+
+# =============================================================================
+# ### v1.6.5 DELTA — network shares (NAS) from the DSP web UI
+# ### (released 2026-07-26; brings any pre-1.6.5 install forward)
+# ###
+# ### Nothing to migrate: the feature is a new card in eq-server.py plus two
+# ### mount helper packages. No existing file is rewritten, and the mount units
+# ### are generated by the UI when the user actually adds a share — so an
+# ### install that never uses it ends up byte-identical to before.
+# =============================================================================
+if version_lt "${CURRENT_VER}" "1.6.5"; then
+
+if [[ -f "${EQ_SERVER_DEST}" ]] || unit_exists squarepi-eq.service; then
+  step "Updating EQ web server (network share support)"
+  if fetch_repo_file "eq-server.py" "${EQ_SERVER_DEST}"; then
+    chmod +x "${EQ_SERVER_DEST}"
+    systemctl restart squarepi-eq 2>/dev/null || true
+    success "eq-server.py updated"
+    APPLIED+=(
+      "DSP web UI can mount a network share (NAS or a shared folder on your computer) — see the new NETWORK SHARE card; it appears in myMPD as 'nas'"
+    )
+  else
+    warn "Could not fetch eq-server.py — network share card unavailable until the next update"
+  fi
+fi
+
+step "Installing network share helpers"
+NAS_PKG_OK=1
+apt-get install -y -qq cifs-utils 2>/dev/null || {
+  warn "cifs-utils unavailable — SMB/Windows shares will not mount"; NAS_PKG_OK=0; }
+apt-get install -y -qq nfs-common 2>/dev/null || {
+  warn "nfs-common unavailable — NFS shares will not mount"; NAS_PKG_OK=0; }
+if [[ ${NAS_PKG_OK} -eq 1 ]]; then
+  success "cifs-utils and nfs-common installed"
+fi
+
+else
+  info "v1.6.5 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v1.6.5 gate ---
+
+# =============================================================================
+# ### v1.6.6 DELTA — network share form layout fix
+# ### (released 2026-07-26; brings any pre-1.6.6 install forward)
+# ###
+# ### Cosmetic, and a re-fetch of eq-server.py is the whole migration. Nothing
+# ### on disk changes, so an install that never opens the share card sees no
+# ### difference beyond the version number.
+# =============================================================================
+if version_lt "${CURRENT_VER}" "1.6.6"; then
+
+if [[ -f "${EQ_SERVER_DEST}" ]] || unit_exists squarepi-eq.service; then
+  step "Updating EQ web server (network share layout fix)"
+  if fetch_repo_file "eq-server.py" "${EQ_SERVER_DEST}"; then
+    chmod +x "${EQ_SERVER_DEST}"
+    systemctl restart squarepi-eq 2>/dev/null || true
+    success "eq-server.py updated"
+    APPLIED+=(
+      "NETWORK SHARE fields sit beside their labels again instead of being pushed to the right edge of the card"
+    )
+  else
+    warn "Could not fetch eq-server.py — layout fix not applied"
+  fi
+fi
+
+else
+  info "v1.6.6 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v1.6.6 gate ---
+
+# =============================================================================
+# ### v1.6.7 DELTA — NAS units: break the boot-time ordering cycle that stopped
+# ### myMPD from starting, and protect the play queue on shutdown
+# ### (released 2026-07-26; brings any pre-1.6.7 install forward)
+# ###
+# ### Two defects in the units the DSP UI generated for a network share:
+# ###
+# ### 1. The .automount was written `After=network-online.target`. An automount
+# ###    is implicitly Before=local-fs.target, and network-online is reached late
+# ###    (after sysinit.target), so this closed an ordering cycle. systemd broke
+# ###    it by deleting local-fs.target's start job; myMPD (Requires=local-fs.
+# ###    target) then silently never started — "music plays, no web UI". Fix:
+# ###    strip network-online from the .automount (it needs no network to exist;
+# ###    only the .mount it triggers does). Reproduced + confirmed on hardware.
+# ###
+# ### 2. The .mount lacked Before=mpd.service — the same shutdown-ordering bug the
+# ###    USB mount unit had in 1.6.3. Without it the share is torn down while MPD
+# ###    still watches it, and MPD purges those tracks and saves an emptied queue.
+# ###
+# ### Units are generated at runtime, so they are patched in place here rather
+# ### than re-fetched. A box that never added a share has no units and is skipped.
+# =============================================================================
+if version_lt "${CURRENT_VER}" "1.6.7"; then
+
+if [[ -f "${EQ_SERVER_DEST}" ]] || unit_exists squarepi-eq.service; then
+  step "Updating EQ web server (network share boot-cycle fix)"
+  if fetch_repo_file "eq-server.py" "${EQ_SERVER_DEST}"; then
+    chmod +x "${EQ_SERVER_DEST}"
+    systemctl restart squarepi-eq 2>/dev/null || true
+    success "eq-server.py updated"
+    APPLIED+=(
+      "Network share no longer stops the myMPD web UI from starting at boot — the generated automount formed a systemd ordering cycle that silently dropped myMPD"
+      "Network share now leaves the play queue intact on shutdown (the mount is ordered before MPD stops, as the USB mount already is)"
+      "The NETWORK SHARE card only shows 'Connected' when a share is really mounted, not whenever the automount is merely enabled"
+    )
+  else
+    warn "Could not fetch eq-server.py — future shares unaffected, patching existing units below"
+  fi
+fi
+
+step "Repairing any already-generated network-share units"
+NAS_MOUNT_POINT="/var/lib/mpd/music/nas"
+NAS_MOUNT_UNIT="$(systemd-escape --path --suffix=mount "${NAS_MOUNT_POINT}" 2>/dev/null || true)"
+NAS_AUTO_UNIT="$(systemd-escape --path --suffix=automount "${NAS_MOUNT_POINT}" 2>/dev/null || true)"
+NAS_PATCHED=0
+
+NAS_AUTO_FILE="/etc/systemd/system/${NAS_AUTO_UNIT}"
+if [[ -n "${NAS_AUTO_UNIT}" && -f "${NAS_AUTO_FILE}" ]]; then
+  if grep -qE '^(After|Wants)=network-online\.target' "${NAS_AUTO_FILE}"; then
+    sed -i -e '/^After=network-online\.target$/d' -e '/^Wants=network-online\.target$/d' "${NAS_AUTO_FILE}"
+    info "automount: removed network-online ordering (this was the boot cycle that dropped myMPD)"
+    NAS_PATCHED=1
+  fi
+fi
+
+NAS_MOUNT_FILE="/etc/systemd/system/${NAS_MOUNT_UNIT}"
+if [[ -n "${NAS_MOUNT_UNIT}" && -f "${NAS_MOUNT_FILE}" ]]; then
+  if ! grep -qE '^Before=mpd\.service' "${NAS_MOUNT_FILE}"; then
+    if grep -qE '^Wants=network-online\.target' "${NAS_MOUNT_FILE}"; then
+      sed -i '/^Wants=network-online\.target$/a Before=mpd.service' "${NAS_MOUNT_FILE}"
+    else
+      # No anchor line to append after — insert right under [Unit].
+      sed -i '/^\[Unit\]$/a Before=mpd.service' "${NAS_MOUNT_FILE}"
+    fi
+    info "mount: added Before=mpd.service (protects the queue on shutdown)"
+    NAS_PATCHED=1
+  fi
+fi
+
+if [[ ${NAS_PATCHED} -eq 1 ]]; then
+  systemctl daemon-reload
+  success "Network-share units repaired — the fix takes full effect on the next reboot"
+  APPLIED+=(
+    "Repaired the network-share units already on this box: removed the automount's network-online ordering (the boot cycle) and ordered the mount before MPD stops"
+  )
+else
+  info "No network-share units to repair (none configured, or already fixed)"
+fi
+
+else
+  info "v1.6.7 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v1.6.7 gate ---
+
+# =============================================================================
+# ### v1.6.8 DELTA — mobile web UI: POWER / UPDATE menus and the share form
+# ### (released 2026-07-26; brings any pre-1.6.8 install forward)
+# ###
+# ### Presentation only — a re-fetch of eq-server.py is the whole migration.
+# ### The mobile top bar used overflow-x:auto, and setting one overflow axis to
+# ### auto forces the other to compute to auto as well, so the bar became a
+# ### clipping box and both dropdowns (drawn below it) were cut off — Restart /
+# ### Shut down / Update were unreachable on a phone. Also: the share form's
+# ### label column left an IP address ~150px, and the card starts folded while
+# ### the nav that would find it is hidden on narrow screens.
+# =============================================================================
+if version_lt "${CURRENT_VER}" "1.6.8"; then
+
+if [[ -f "${EQ_SERVER_DEST}" ]] || unit_exists squarepi-eq.service; then
+  step "Updating EQ web server (mobile layout fixes)"
+  if fetch_repo_file "eq-server.py" "${EQ_SERVER_DEST}"; then
+    chmod +x "${EQ_SERVER_DEST}"
+    systemctl restart squarepi-eq 2>/dev/null || true
+    success "eq-server.py updated"
+    APPLIED+=(
+      "POWER (Restart / Shut down) and UPDATE menus now open on a phone — the top bar was clipping them off"
+      "NETWORK SHARE form is usable on a phone: labels above their fields, full-width entry boxes"
+      "NETWORK SHARE card starts open on a phone, where there is no side navigation to find it with"
+    )
+  else
+    warn "Could not fetch eq-server.py — mobile layout fixes not applied"
+  fi
+fi
+
+else
+  info "v1.6.8 delta already applied (installed version ${CURRENT_VER}) — skipping"
+fi
+# --- end v1.6.8 gate ---
+
+# =============================================================================
+# ### END v1.6.8 DELTA
+# =============================================================================
+
+# =============================================================================
 # ### v2.0.0 DELTA — local on-device display (ST7735 + KY-040), opt-in
 # ### (released 2026-07-25; brings any pre-2.0.0 install forward)
 # ###
