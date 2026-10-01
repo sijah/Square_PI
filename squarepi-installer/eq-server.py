@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-EQ_SERVER_VER = "1.6.8"
+EQ_SERVER_VER = "1.6.9"
 
 CARD = "LouderRaspberry"
 BT_VOL_CONTROL = "BT Volume"
@@ -1334,6 +1334,7 @@ HTML = r"""<!DOCTYPE html>
        the bar) were cut off entirely on a phone. z-index can't rescue that:
        clipping happens before stacking. Wrapping keeps the buttons reachable,
        which is the point. */
+    .app { grid-template-rows:auto 1fr; }   /* a fixed 50px row let the wrapped bar spill over the content */
     .topbar { flex-wrap:wrap; padding:6px 14px; }
     .topbar-brand { width:auto; }
     .topbar-center { flex-basis:100%; order:3; height:0; }

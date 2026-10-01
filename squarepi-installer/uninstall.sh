@@ -58,7 +58,7 @@ detach_usb_drives() {
 # Banner
 # -----------------------------------------------------------------------------
 echo -e "${BOLD}"
-INSTALLER_VER="1.6.8"
+INSTALLER_VER="1.6.9"
 
 echo "  ╔══════════════════════════════════════════════╗"
 echo "  ║         SquarePi Software Uninstaller        ║"
@@ -347,6 +347,7 @@ for svc in squarepi-resume squarepi-resume-mark; do
 done
 rm -f /usr/local/bin/squarepi-resume.sh /usr/local/bin/squarepi-resume-mark.sh
 rm -f /run/squarepi-resume /var/lib/squarepi/resume_on_boot
+rm -f /var/lib/squarepi/mpd-state.good /var/lib/squarepi/boot.log
 
 # Network share. The units are generated at runtime by the DSP UI, so their
 # names are derived the same way it derives them rather than hardcoded.

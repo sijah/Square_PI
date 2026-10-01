@@ -89,7 +89,7 @@ fi
 # -----------------------------------------------------------------------------
 # SquarePi branding and hardware config — edit here if your HAT differs
 # -----------------------------------------------------------------------------
-INSTALLER_VER="1.6.8"
+INSTALLER_VER="1.6.9"
 
 BRAND_NAME="${SQUAREPI_BRAND_NAME:-SquarePi}"
 BRAND_TAGLINE="${SQUAREPI_TAGLINE:-From square wave to every corner.}"
@@ -848,14 +848,57 @@ mkdir -p /var/lib/squarepi
 
 cat > /usr/local/bin/squarepi-resume-mark.sh <<EOF
 #!/bin/bash
-# Runs BEFORE mpd.service. Records whether MPD was playing when the system last
-# went down, because MPD is about to overwrite that with "pause" (restore_paused).
+# Runs BEFORE mpd.service, while the state file MPD left behind is still untouched.
+#
+# 1. Check the file survived. This speaker is normally turned off at the wall, and
+#    a power cut that lands while MPD is rewriting the file (every 30s) can leave
+#    it empty or cut short. MPD then starts with no queue and its software volume
+#    at the 100% default -- full blast on the next play. A damaged file is
+#    replaced with the last good copy; a good one becomes the new copy.
+# 2. Record whether MPD was playing when the system last went down, because MPD
+#    is about to overwrite that with "pause" (restore_paused).
 STATE_FILE="/var/lib/mpd/state"
+GOOD_COPY="/var/lib/squarepi/mpd-state.good"
 MARKER="/run/squarepi-resume"
+BOOT_LOG="/var/lib/squarepi/boot.log"
+
+log() {
+  echo "\$(date '+%F %T') mark: \$*" >> "\${BOOT_LOG}"
+  tail -n 200 "\${BOOT_LOG}" > "\${BOOT_LOG}.tmp" && mv "\${BOOT_LOG}.tmp" "\${BOOT_LOG}"
+}
+
+# A whole state file has the volume and the player state, and a queue that was
+# started (playlist_begin) was also finished (playlist_end).
+state_ok() {
+  [[ -s "\$1" ]] || return 1
+  grep -q '^sw_volume: ' "\$1" && grep -q '^state: ' "\$1" || return 1
+  if grep -q '^playlist_begin' "\$1"; then
+    grep -q '^playlist_end' "\$1" || return 1
+  fi
+  return 0
+}
 
 rm -f "\${MARKER}"
-[[ -f "\${STATE_FILE}" ]] || exit 0
-if grep -qE '^state: play\$' "\${STATE_FILE}"; then
+mkdir -p /var/lib/squarepi
+
+size="\$(stat -c %s "\${STATE_FILE}" 2>/dev/null || echo missing)"
+if state_ok "\${STATE_FILE}"; then
+  # Copy, flush, then rename: a power cut during the copy must not damage the
+  # good copy too.
+  if cp "\${STATE_FILE}" "\${GOOD_COPY}.tmp"; then
+    sync "\${GOOD_COPY}.tmp" 2>/dev/null || true
+    mv "\${GOOD_COPY}.tmp" "\${GOOD_COPY}"
+  fi
+  log "state ok (\${size} bytes)"
+elif state_ok "\${GOOD_COPY}"; then
+  cp "\${GOOD_COPY}" "\${STATE_FILE}"
+  chown mpd:audio "\${STATE_FILE}" 2>/dev/null || true
+  log "state DAMAGED (\${size} bytes) -- restored the last good copy"
+else
+  log "state DAMAGED (\${size} bytes) -- no good copy to restore"
+fi
+
+if grep -qE '^state: play\$' "\${STATE_FILE}" 2>/dev/null; then
   touch "\${MARKER}"
 fi
 exit 0
@@ -864,9 +907,13 @@ chmod +x /usr/local/bin/squarepi-resume-mark.sh
 
 cat > /usr/local/bin/squarepi-resume.sh <<EOF
 #!/bin/bash
-# Runs AFTER mpd.service. Presses play, but only once it is safe to.
+# Runs AFTER mpd.service. Every boot: brings the volume down to a safe level and
+# rescans USB drives that mounted before MPD was up. Then presses play, but only
+# if MPD was playing when the box went down and only once it is safe to.
 MARKER="/run/squarepi-resume"
 FLAG="${RESUME_FLAG_FILE}"
+BOOT_LOG="/var/lib/squarepi/boot.log"
+BOOT_VOL_MAX=25
 DEADLINE=\$((SECONDS + 60))
 
 # Always clear the marker, whatever happens below: a resume that could not
@@ -874,15 +921,43 @@ DEADLINE=\$((SECONDS + 60))
 cleanup() { rm -f "\${MARKER}"; }
 trap cleanup EXIT
 
-[[ -f "\${MARKER}" ]] || exit 0
-[[ "\$(cat "\${FLAG}" 2>/dev/null)" == "1" ]] || exit 0
+log() {
+  echo "\$(date '+%F %T') resume: \$*" >> "\${BOOT_LOG}"
+  tail -n 200 "\${BOOT_LOG}" > "\${BOOT_LOG}.tmp" && mv "\${BOOT_LOG}.tmp" "\${BOOT_LOG}"
+}
 
 # Wait for MPD to answer. It is ordered before us, but "started" and "accepting
 # connections" are not the same instant.
 while ! mpc status >/dev/null 2>&1; do
-  (( SECONDS < DEADLINE )) || exit 0
+  if (( SECONDS >= DEADLINE )); then
+    log "MPD not answering after 60s -- nothing done"
+    exit 0
+  fi
   sleep 2
 done
+
+# Never start loud. Volume is MPD's software mixer, saved in its state file; if
+# that file was lost to a power cut MPD comes back at 100%. An unreadable volume
+# is treated the same way.
+vol="\$(mpc volume 2>/dev/null | grep -o '[0-9]\+' | head -n1)"
+if [[ -z "\${vol}" ]] || (( vol > BOOT_VOL_MAX )); then
+  mpc volume "\${BOOT_VOL_MAX}" >/dev/null 2>&1 || true
+  log "volume \${vol:-unknown}% -> \${BOOT_VOL_MAX}%"
+else
+  log "volume \${vol}%"
+fi
+
+# The mount helper skips its rescan when it runs before MPD (the usual case at
+# boot), so songs copied onto a drive from a PC would not show up. Rescan here.
+# MPD only re-reads what changed, so an unchanged drive costs little.
+for mp in "${USB_MOUNT_ROOT}"/*; do
+  mountpoint -q "\${mp}" || continue
+  mpc update "usb/\${mp##*/}" >/dev/null 2>&1 || true
+  log "rescanned usb/\${mp##*/}"
+done
+
+[[ -f "\${MARKER}" ]] || exit 0
+[[ "\$(cat "\${FLAG}" 2>/dev/null)" == "1" ]] || exit 0
 
 # Nothing loaded means nothing to resume -- an empty queue, or a stop.
 [[ -n "\$(mpc current 2>/dev/null)" ]] || exit 0
@@ -918,10 +993,10 @@ chmod +x /usr/local/bin/squarepi-resume.sh
 cat > /etc/systemd/system/squarepi-resume-mark.service <<'EOF'
 [Unit]
 Description=SquarePi — record whether MPD was playing before this boot
-# Must read /var/lib/mpd/state before MPD rewrites it.
+# Must read /var/lib/mpd/state before MPD rewrites it. No ConditionPathExists:
+# a state file lost to a power cut is exactly the case it has to handle.
 Before=mpd.service
 After=local-fs.target
-ConditionPathExists=/var/lib/mpd/state
 
 [Service]
 Type=oneshot

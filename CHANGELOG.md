@@ -4,6 +4,19 @@ All notable changes to the SquarePi installer are documented here.
 
 ---
 
+## [1.6.9] — 2026-10-01
+
+### Fixed
+- **Switching the speaker off at the wall could bring it back at full volume with the queue gone.** MPD saves the queue and the volume to one small file every 30 seconds. If the power went off while that file was being written, it could come back empty, and MPD then started with nothing queued and its volume at 100%. The next song played at full blast. At every boot the speaker now checks that file before MPD reads it. If it's damaged, the speaker puts back the last good copy, so the queue and volume return as they were.
+- **The speaker could start loud after a restart.** As a safety net, the volume is now brought down to 25% at every boot if it was set higher. Turn it back up as usual once it's playing.
+- **Songs copied onto a USB drive from a PC didn't show up after a reboot.** At boot the drive is mounted before MPD is running, so the library rescan was skipped. The drive is now rescanned once MPD is up. Only changed files are re-read.
+- **On a phone, the top-bar buttons could overlap the page.** When the bar wrapped onto a second line, its row stayed 50 pixels tall, so the second line of buttons (including POWER) sat on top of the first card. The row now grows with the bar.
+
+### Added
+- Each boot writes one line to `/var/lib/squarepi/boot.log`: whether the state file was intact, the volume, and which USB drives were rescanned. It keeps the last 200 lines.
+
+---
+
 ## [1.6.8] — 2026-07-26
 
 ### Fixed
